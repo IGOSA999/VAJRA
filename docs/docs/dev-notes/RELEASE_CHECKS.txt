@@ -1,0 +1,11 @@
+VAJRA release checks
+
+- Python test suite: 33 passed, 1 skipped in the final review workspace.
+- slop scan: PASS.
+- compileall: PASS.
+- JavaScript syntax check: PASS.
+- Background job start and health responsiveness: PASS.
+- ANSYS Student 2026 R1 Level-A wall-panel run: completed.
+- Python/ANSYS comparison: 4,021 points; max absolute difference 2.218076 C; RMS difference 1.437016 C.
+- Real Leh NASA POWER file must remain present for the judged demo.
+- Comfort band 15 to 28 C remains a project input and should be agreed before presentation.

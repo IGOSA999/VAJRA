@@ -1,0 +1,9 @@
+VAJRA build status
+
+Current checks in the final review workspace: 33 passed, 1 skipped; slop scan passed; compile check passed; JavaScript syntax check passed.
+
+The bundled real Leh 2024 weather file is expected at data/weather/leh_2024_hourly.csv. The dashboard shows its NASA POWER provenance and hour coverage when the file is present.
+
+ANSYS Student 2026 R1 wall-panel run completed on the team machine. The aligned Python comparison used 4,021 points and reported maximum absolute difference 2.218076 C and RMS difference 1.437016 C.
+
+The dashboard uses real background solver jobs. It does not serve precomputed simulation results.

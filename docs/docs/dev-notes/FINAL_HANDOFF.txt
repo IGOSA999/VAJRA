@@ -1,0 +1,18 @@
+VAJRA final handoff
+
+Local start:
+  py -3.12 -m venv .venv
+  .\\.venv\\Scripts\\Activate.ps1
+  python -m pip install -r requirements-dev.txt
+  python run.py
+
+Verification:
+  python -m pytest -q
+  python scripts/slop_scan.py
+
+ANSYS Level A:
+  exports/ansys contains the generated wall panel package.
+  Recorded team run: max_abs_difference_c=2.218076, rms_difference_c=1.437016 over 4,021 points.
+
+Deployment:
+  Render uses render.yaml, Python 3.12 and /api/health.
