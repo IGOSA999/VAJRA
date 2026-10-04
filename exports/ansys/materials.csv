@@ -1,0 +1,2 @@
+material,lambda_w_mk,rho_kg_m3,c_j_kgk,source
+stone_masonry,2.2,2500.0,850.0,"ASHRAE Handbook of Fundamentals, thermal properties section; starting value within stated range in build brief"

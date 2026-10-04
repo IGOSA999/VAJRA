@@ -1,0 +1,16 @@
+{
+  "1440": {
+    "plexSans": true,
+    "plexMono": true,
+    "sourceSerif": true,
+    "titleFamily": "\"Source Serif 4\", serif",
+    "bodyFamily": "\"IBM Plex Sans\", sans-serif"
+  },
+  "390": {
+    "plexSans": true,
+    "plexMono": true,
+    "sourceSerif": true,
+    "titleFamily": "\"Source Serif 4\", serif",
+    "bodyFamily": "\"IBM Plex Sans\", sans-serif"
+  }
+}

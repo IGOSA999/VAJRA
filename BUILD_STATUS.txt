@@ -1,0 +1,17 @@
+VAJRA build status
+
+Current automated checks: 11 original verification tests passed in the prior isolated test run, plus the review-fix tests recorded in docs/final-report.md. The stage-2 baseline regression and targeted web/API checks pass in this review. scripts/slop_scan.py: passed.
+
+Screenshots reviewed at 1440x900 and 390x844 after the bundled font update.
+
+Real Leh NASA POWER weather fetch: not possible in this sandbox because outbound DNS/network access is blocked. Team-side run required.
+ANSYS Level A export: generated with an exact layered wall-panel macro, time-dependent convection tables, and Python inner-surface output; ANSYS run: not performed.
+pvlib full-year cross-check: team-reported clean-environment run completed. Solar elevation matched within 0.01 degrees above 5 degrees elevation; south-wall annual POA total differed by about 0.3%; hourly MAPE was about 3.3%. The acceptance criterion is annual total within 1%.
+PCM apparent-capacity implementation: implemented and covered by review-fix tests.
+Stage-2 baseline selection: corrected to retain the baseline plus the best 20 non-baseline candidates. Targeted integration smoke test passes: 21 confirmed rows, including the baseline and 20 non-baseline designs.
+1000-design speed target: remains unmet; latest repository report contains the previously measured shortfall.
+
+
+Web dashboard repair: initial full-year 10-minute default calculation caused the browser to appear blank while waiting. The web layer now populates controls first, uses 14/30/365-day windows, reports status, supports uploaded CSV selection, and uses hourly interactive runs. Targeted web API tests: 3 passed; dashboard-window regressions are retained. `scripts/slop_scan.py` passes. The screenshot harness reports all four bundled fonts loaded at both required viewport sizes.
+
+Clean-install dependency correction: current Starlette TestClient requires httpx2; requirements.txt and pyproject.toml now pin httpx2==2.13.1 after the team reproduced the clean-venv collection failure. The top-level tested dependency versions are pinned for repeatable installation.

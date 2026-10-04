@@ -1,0 +1,25 @@
+VAJRA final release handoff
+
+Start (PowerShell):
+  py -3.11 -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+  python -m pip install -r requirements.txt
+  python run.py
+Start (Command Prompt):
+  py -3.11 -m venv .venv
+  .venv\Scripts\activate.bat
+  python -m pip install -r requirements.txt
+  python run.py
+Then open http://127.0.0.1:8000
+
+Before presentation:
+  python scripts/fetch_weather.py
+  python -m pytest -q
+  python scripts/slop_scan.py
+
+Team-side ANSYS:
+  Use the dashboard to prepare ANSYS files. In exports/ansys, run wall_panel.mac with the two tab-delimited
+  table files beside it. The macro writes ansys_wall_results.csv. Then run scripts/compare_ansys.py from
+  the project root and record max_abs_difference_c and rms_difference_c.
+
+Do not present synthetic weather output as a Leh result. The bundled data/weather/README.txt states the expected real file.

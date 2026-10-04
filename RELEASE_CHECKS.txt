@@ -1,0 +1,23 @@
+VAJRA final release checks, 3 October 2026
+
+Verified in the release workspace:
+- python -m compileall -q vajra tests: PASS
+- python scripts/slop_scan.py: PASS
+- targeted integration/API/ANSYS-export/window tests: 11 PASS
+- current repository test inventory: 28 test functions, including one conditional pvlib test
+
+User-side clean-environment verification before this final integration patch:
+- Python 3.11 virtual environment installed from requirements.txt: PASS
+- python -m pytest -q: 23 PASS, 1 warning, 1182.05 s
+- python scripts/slop_scan.py: PASS
+- python scripts/fetch_weather.py: produced data/weather/leh_2024_hourly.csv
+- pvlib full-year comparison: team-reported elevation <= 0.01 deg above 5 deg, south-wall annual POA difference about 0.3%, hourly MAPE about 3.3%. Acceptance criterion is annual total within 1%.
+
+Clean-install dependency correction after Windows review:
+- Current Starlette TestClient requires httpx2; the release now pins httpx2==2.13.1 in requirements.txt and pyproject.toml. The tested top-level dependency versions are pinned in the release requirements.
+- The reported clean venv collection error was `RuntimeError: The starlette.testclient module requires the httpx2 package to be installed.`
+
+Known team-side steps:
+- rerun the full 28-test suite after copying the release if you need a final post-patch clean-install count
+- run ANSYS Level A wall-panel export in the installed ANSYS version and then scripts/compare_ansys.py
+- use the real Leh NASA POWER file for presentation; do not present synthetic test data as a Leh result
