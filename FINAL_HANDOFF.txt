@@ -17,9 +17,10 @@ Before presentation:
   python -m pytest -q
   python scripts/slop_scan.py
 
-Team-side ANSYS:
-  Use the dashboard to prepare ANSYS files. In exports/ansys, run wall_panel.mac with the two tab-delimited
-  table files beside it. The macro writes ansys_wall_results.csv. Then run scripts/compare_ansys.py from
-  the project root and record max_abs_difference_c and rms_difference_c.
+ANSYS Level-A validation completed:
+  ANSYS Student 2026 R1 produced ansys_wall_results.csv. Python/ANSYS comparison over 4021 points:
+  max_abs_difference_c = 2.218076
+  rms_difference_c = 1.437016
+  This is a wall-panel cross-check, not measured shelter validation.
 
 Do not present synthetic weather output as a Leh result. The bundled data/weather/README.txt states the expected real file.

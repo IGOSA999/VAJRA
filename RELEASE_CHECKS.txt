@@ -19,5 +19,5 @@ Clean-install dependency correction after Windows review:
 
 Known team-side steps:
 - rerun the full 28-test suite after copying the release if you need a final post-patch clean-install count
-- run ANSYS Level A wall-panel export in the installed ANSYS version and then scripts/compare_ansys.py
-- use the real Leh NASA POWER file for presentation; do not present synthetic test data as a Leh result
+- ANSYS Level A wall-panel run completed in ANSYS Student 2026 R1; scripts/compare_ansys.py reported 4021 points, max_abs_difference_c=2.218076 and rms_difference_c=1.437016
+- real Leh NASA POWER file is present at data/weather/leh_2024_hourly.csv

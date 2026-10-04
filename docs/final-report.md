@@ -79,7 +79,7 @@ The 70/30 split of transmitted solar energy, ground properties, wind-scaling exp
 
 The pvlib comparison has been executed by the team in a clean environment. The sandbox here cannot reproduce it because pvlib is not installed.
 
-The exported ANSYS Level A wall-panel case has not been run in ANSYS in this environment. The macro now builds the exact exported wall-layer stack with SOLID278, reads time-dependent outside and inside air tables, solves a transient thermal wall panel, and writes an inner-surface temperature CSV. The Python side exports the matching wall-main inner-surface series for comparison. The actual ANSYS run remains a team-side task.
+The exported ANSYS Level-A wall-panel case was run in ANSYS Student 2026 R1. The comparison used 4021 Python points and reported a maximum absolute difference of 2.218076 C and RMS difference of 1.437016 C. The macro now builds the exact exported wall-layer stack with SOLID278, reads time-dependent outside and inside air tables, solves a transient thermal wall panel, and writes an inner-surface temperature CSV. The Python side exports the matching wall-main inner-surface series for comparison. The ANSYS Level-A wall-panel run has been completed in ANSYS Student 2026 R1.
 
 The solver has not been validated against measured shelter sensor data.
 

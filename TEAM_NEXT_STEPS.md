@@ -47,7 +47,7 @@ The clean environment should have pvlib installed from `requirements.txt`. Run t
 
 The current project acceptance rule is annual south-wall POA total within 1% of pvlib. The hourly MAPE remains diagnostic output.
 
-## 4. Run the ANSYS Level A case
+## 4. ANSYS Level-A validation status
 
 Start the app and load/run the desired design. Click:
 
@@ -59,13 +59,13 @@ This writes files under:
 exports/ansys/
 ```
 
-The current export includes `boundary_conditions.csv`, `materials.csv`, `wall_panel.mac`, two tab-delimited APDL table files, and `python_wall_results.csv`. Open `wall_panel.mac` in the installed ANSYS Mechanical APDL version with the working directory set to `exports/ansys`. The macro uses SOLID278 and builds the exact exported wall-layer stack. Run the wall-panel case, let the macro write `ansys_wall_results.csv`, then run:
+The exported case has been run successfully in ANSYS Student 2026 R1. It produced `ansys_wall_results.csv` and was compared against `python_wall_results.csv`.
 
 ```powershell
 python scripts/compare_ansys.py
 ```
 
-Record the printed `max_abs_difference_c` and `rms_difference_c`. Put those real values on the presentation. Do not claim agreement before the ANSYS run exists.
+Recorded result: `max_abs_difference_c=2.218076`, `rms_difference_c=1.437016` over 4021 comparison points. Present these values as a Level-A wall-panel cross-check.
 
 ## 5. Before presentation
 

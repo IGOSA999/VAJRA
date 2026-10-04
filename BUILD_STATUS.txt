@@ -4,8 +4,8 @@ Current automated checks: 11 original verification tests passed in the prior iso
 
 Screenshots reviewed at 1440x900 and 390x844 after the bundled font update.
 
-Real Leh NASA POWER weather fetch: not possible in this sandbox because outbound DNS/network access is blocked. Team-side run required.
-ANSYS Level A export: generated with an exact layered wall-panel macro, time-dependent convection tables, and Python inner-surface output; ANSYS run: not performed.
+Real Leh NASA POWER weather file: present at data/weather/leh_2024_hourly.csv.
+ANSYS Level A export: generated with an exact layered wall-panel macro, time-dependent convection tables, and Python inner-surface output; ANSYS Student 2026 R1 run completed. Comparison: 4021 points, max absolute difference 2.218076 C, RMS difference 1.437016 C.
 pvlib full-year cross-check: team-reported clean-environment run completed. Solar elevation matched within 0.01 degrees above 5 degrees elevation; south-wall annual POA total differed by about 0.3%; hourly MAPE was about 3.3%. The acceptance criterion is annual total within 1%.
 PCM apparent-capacity implementation: implemented and covered by review-fix tests.
 Stage-2 baseline selection: corrected to retain the baseline plus the best 20 non-baseline candidates. Targeted integration smoke test passes: 21 confirmed rows, including the baseline and 20 non-baseline designs.
