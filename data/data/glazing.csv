@@ -1,4 +1,0 @@
-name,label,u_w_m2k,shgc,source,value_status
-single_clear,"Single glazing, clear",5.7,0.85,ASHRAE building envelope reference; build brief starting point,typical
-double_clear,"Double glazing, clear",2.85,0.73,ASHRAE building envelope reference; build brief starting range,typical
-double_low_e,"Double glazing, low-e",1.6,0.50,Manufacturer and building envelope reference; build brief starting range,typical

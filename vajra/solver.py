@@ -10,7 +10,7 @@ import pandas as pd
 
 from .geometry import build_surfaces
 from .materials import load_glazing, load_materials
-from .solar import plane_of_array
+from .solar import plane_of_array, solar_position
 
 SIGMA = 5.670374419e-8
 H_INSIDE = 1.0 / 0.13
@@ -224,20 +224,20 @@ def _conductance(a: LayerNode, b: LayerNode, area: float) -> float:
     return area / max(r, 1e-12)
 
 
-def _external_coeff(weather_row, surface, surface_temp_c: float):
-    wind = max(0.0, float(weather_row.wind10_ms))
+def _external_coeff(t_air_c: float, wind10_ms: float, lw_down_wm2: float, surface, surface_temp_c: float):
+    wind = max(0.0, float(wind10_ms))
     v_surface = wind * (2.0 / 10.0) ** 0.14
     hc = 5.7 + 3.8 * v_surface
     emissivity = 0.90
-    lw_down = float(weather_row.lw_down_wm2) if np.isfinite(weather_row.lw_down_wm2) else 240.0
+    lw_down = float(lw_down_wm2) if np.isfinite(lw_down_wm2) else 240.0
     sky_t = (max(1.0, lw_down) / SIGMA) ** 0.25
-    ground_t = float(weather_row.t_air_c) + 273.15
+    ground_t = float(t_air_c) + 273.15
     fsky = (1.0 + math.cos(math.radians(surface.tilt_deg))) / 2.0
     trad = (fsky * sky_t**4 + (1.0 - fsky) * ground_t**4) ** 0.25
-    tm = max(180.0, ((surface_temp_c + 273.15) + float(weather_row.t_air_c) + 273.15) / 2)
+    tm = max(180.0, ((surface_temp_c + 273.15) + float(t_air_c) + 273.15) / 2)
     hr = 4.0 * emissivity * SIGMA * tm**3
     coeff = hc + hr
-    source = hc * float(weather_row.t_air_c) + hr * (trad - 273.15)
+    source = hc * float(t_air_c) + hr * (trad - 273.15)
     return coeff, source, hc, hr
 
 
@@ -344,6 +344,11 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
     frame = weather.frame.copy().sort_index()
     if dt_minutes != 60:
         frame = frame.resample(f"{dt_minutes}min").interpolate("time").ffill().bfill()
+    # Precompute solar position and weather arrays once per simulation.
+    lat = float(design["site"]["lat"])
+    lon = float(design["site"]["lon"])
+    solar_zenith, solar_azimuth = solar_position(frame.index, lat, lon)
+    is_night_frame = (90.0 - solar_zenith) <= 0.0
     surfaces = build_surfaces(design)
     constructions = design["constructions"]
     layer_nodes = {}
@@ -408,9 +413,39 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
     mass_area = mass["surface_area_m2"] if mass else 0.0
     mass_g = mass["h_w_m2k"] * mass_area if mass else 0.0
 
-    for step_idx, (ts, wr) in enumerate(extended.iterrows()):
-        local = ts + pd.Timedelta(hours=5.5)
-        local_hour = local.hour + local.minute / 60.0
+    # All weather values used by the time-step loop are numpy arrays.
+    ts_values = extended.index.to_numpy()
+    t_air_values = extended["t_air_c"].to_numpy(dtype=float)
+    wind_values = extended["wind10_ms"].to_numpy(dtype=float)
+    pressure_values = extended["pressure_kpa"].to_numpy(dtype=float)
+    ghi_values = extended["ghi_wm2"].to_numpy(dtype=float)
+    lw_values = extended["lw_down_wm2"].to_numpy(dtype=float)
+    local_index = extended.index + pd.Timedelta(hours=5.5)
+    local_hour_values = local_index.hour.to_numpy(dtype=float) + local_index.minute.to_numpy(dtype=float) / 60.0
+
+    # Compute plane-of-array irradiance once per surface and reuse it for every timestep.
+    poa_by_surface = {}
+    for surface in surfaces:
+        if surface.kind != "floor":
+            poa_by_surface[surface.name] = np.asarray(
+                plane_of_array(
+                    surface.tilt_deg, surface.azimuth_deg, extended.index,
+                    np.maximum(extended["ghi_wm2"].to_numpy(dtype=float), 0.0),
+                    np.maximum(extended["dhi_wm2"].to_numpy(dtype=float), 0.0),
+                    np.maximum(extended["dni_wm2"].to_numpy(dtype=float), 0.0),
+                    float(design["site"]["lat"]), float(design["site"]["lon"]),
+                    float(design.get("ground_reflectance", 0.2)),
+                ),
+                dtype=float,
+            )
+
+    for step_idx, ts in enumerate(ts_values):
+        t_air_c = float(t_air_values[step_idx])
+        wind10_ms = float(wind_values[step_idx])
+        pressure_kpa = float(pressure_values[step_idx])
+        ghi_wm2 = float(ghi_values[step_idx])
+        lw_down_wm2 = float(lw_values[step_idx])
+        local_hour = float(local_hour_values[step_idx])
         mass_trial = mass_prev if mass is not None else None
         last_mass_solution = None
         x = None
@@ -443,10 +478,10 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
                     gground = materials["soil"].lambda_w_mk / soil[0][0] * area
                     _add_coupling(A, start, soil_offset, gground)
                 else:
-                    poa = _solar_value(s, ts, wr, design, extended, step_idx)
+                    poa = float(poa_by_surface[s.name][step_idx])
                     incident_this_step[s.name] = poa * area * dt_s / 3.6e6
                     mat = materials[nodes[0].material]
-                    coeff, source, _, _ = _external_coeff(wr, s, prev[0])
+                    coeff, source, _, _ = _external_coeff(t_air_c, wind10_ms, lw_down_wm2, s, prev[0])
                     coeff_eff = coeff * opaque_area / area if area > 0 else 0.0
                     source_eff = source * opaque_area / area + mat.absorptance * poa
                     A[start, start] += coeff_eff * area
@@ -478,9 +513,9 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
                 u_window = 1.0 / (1.0 / glz.u_w_m2k + r_cover)
                 g_window = u_window * op_area
                 A[air_idx, air_idx] += g_window
-                b[air_idx] += g_window * float(wr.t_air_c)
+                b[air_idx] += g_window * t_air_c
                 main_surface = next(s for s in surfaces if s.name == "wall_main")
-                poa = _solar_value(main_surface, ts, wr, design, extended, step_idx)
+                poa = float(poa_by_surface[main_surface.name][step_idx])
                 solar_transmitted_power = glz.shgc * op_area * poa
                 split = min(1.0, max(0.0, float(design["solar_split"]["floor_and_mass"])))
                 floor_inner = offsets["floor"] + len(layer_nodes["floor"]) - 1
@@ -495,14 +530,14 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
                     b[target] += remaining * weight
                 # Accumulate the final converged timestep once, after the nonlinear mass solve.
 
-            rho_air = max(0.2, float(wr.pressure_kpa) * 1000.0 / (287.05 * (float(wr.t_air_c) + 273.15)))
+            rho_air = max(0.2, pressure_kpa * 1000.0 / (287.05 * (t_air_c + 273.15)))
             ach = float(design["air"]["infiltration_ach"])
             vent_start, vent_end = design["air"]["vent_hours"]
             if float(vent_start) <= local_hour < float(vent_end):
                 ach += float(design["air"]["vent_ach"])
             g_vent = rho_air * 1005.0 * volume * ach / 3600.0
             A[air_idx, air_idx] += air_cap / dt_s + g_vent
-            b[air_idx] += air_cap / dt_s * t_air_prev + g_vent * float(wr.t_air_c) + float(design["internal_gains_w"])
+            b[air_idx] += air_cap / dt_s * t_air_prev + g_vent * t_air_c + float(design["internal_gains_w"])
 
             if mass is not None:
                 ceff = _mass_ceff(mass, float(mass_trial))
@@ -553,10 +588,10 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
             cover = op["night_cover"]
             r_cover = float(cover["r_m2k_per_w"]) if _night_cover_closed(cover, local_hour) else 0.0
             u_window = 1.0 / (1.0 / glz.u_w_m2k + r_cover)
-            q_glazing = u_window * op_area * (float(wr.t_air_c) - t_air)
+            q_glazing = u_window * op_area * (t_air_c - t_air)
         flows["glazing"] = q_glazing
         q_from_air += q_glazing
-        q_vent = g_vent * (float(wr.t_air_c) - t_air)
+        q_vent = g_vent * (t_air_c - t_air)
         flows["ventilation"] = q_vent
         internal_gain = float(design["internal_gains_w"])
         q_from_air += q_vent + internal_gain
@@ -572,9 +607,9 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
                 continue
             op_area = opening[1] if (s.name == "wall_main" and opening is not None) else 0.0
             opaque_area = max(s.area_m2 - op_area, 0.0)
-            coeff, source, _, _ = _external_coeff(wr, s, states[s.name][0])
+            coeff, source, _, _ = _external_coeff(t_air_c, wind10_ms, lw_down_wm2, s, states[s.name][0])
             if s.area_m2 > 0:
-                poa = _solar_value(s, ts, wr, design, extended, step_idx)
+                poa = float(poa_by_surface[s.name][step_idx])
                 mat = materials[nodes[0].material]
                 coeff_eff = coeff * opaque_area / s.area_m2
                 source_eff = source * opaque_area / s.area_m2 + mat.absorptance * poa
@@ -614,7 +649,7 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
         if mass is not None:
             mass_prev = float(x[mass_idx])
         if step_idx >= warmup_steps:
-            out_rows.append({"time": ts.isoformat(), "t_air_out_c": float(wr.t_air_c), "t_air_in_c": t_air, "ghi_wm2": float(wr.ghi_wm2), "solar_in_w": solar_transmitted_power})
+            out_rows.append({"time": ts.isoformat(), "t_air_out_c": t_air_c, "t_air_in_c": t_air, "ghi_wm2": ghi_wm2, "solar_in_w": solar_transmitted_power})
             surface_temp_rows.append({
                 s.name: float(x[offsets[s.name] + len(layer_nodes[s.name]) - 1])
                 for s in surfaces
@@ -636,10 +671,13 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
     over = np.clip(temps - high, 0, None)
     surface_areas = {s.name: s.area_m2 for s in surfaces}
     solar_incident = {name: float(sum(row.get(name, 0.0) for row in solar_rows) / max(surface_areas[name], 1e-9)) for name in surface_areas}
+    outside_temps = out["t_air_out_c"].to_numpy(dtype=float)
     summary = {
         "t_min_c": float(temps.min()),
         "t_max_c": float(temps.max()),
         "comfort_hours": float(np.sum((temps >= low) & (temps <= high)) * hours),
+        "hours_above_zero": float(np.sum(temps > 0.0) * hours),
+        "mean_delta_c": float(np.mean(temps - outside_temps)),
         "hours_below_low": float(np.sum(temps < low) * hours),
         "degree_hours_below_kh": float(np.sum(below) * hours),
         "overheat_hours": float(np.sum(temps > high) * hours),
@@ -675,6 +713,8 @@ def simulate(design: dict, weather, materials_path: Path, glazing_path: Path, dt
         },
         "series": {
             "time": list(out.index),
+            "time_ist": [pd.Timestamp(t).tz_convert("Asia/Kolkata").isoformat() for t in out.index],
+            "is_night": is_night_frame[warmup_steps:].astype(bool).tolist(),
             "t_air_out_c": out.t_air_out_c.round(4).tolist(),
             "t_air_in_c": out.t_air_in_c.round(4).tolist(),
             "ghi_wm2": out.ghi_wm2.round(4).tolist(),

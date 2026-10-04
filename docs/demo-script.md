@@ -1,12 +1,14 @@
-# Three minute demo path
+# Three-minute VAJRA demo
 
-1. Start with `python run.py` and open `http://127.0.0.1:8000`.
-2. Point out the weather source line. The sandbox build shows the bundled synthetic test series until a real Leh file is fetched.
-3. Show the default geometry, wall layers, glazing, ventilation and comfort inputs.
-4. Press Run. Point to indoor and ambient temperature, the comfort band, and the minimum temperature annotation.
-5. Point to the shelter section. Explain that the drawing is generated from the current geometry and material layers.
-6. Point to heat flow by element and the metric strip. State that heating energy is an ideal-heater model estimate.
-7. Change insulation thickness and run again. Compare the model outputs.
-8. Use the compare control to run the reduced candidate sweep and show the named baseline row.
-9. Export the design sheet. Show that it carries inputs, metrics, weather provenance and the model-estimate note.
-10. Export the ANSYS Level A case. Show the three generated files and state that the team must run the macro in the installed ANSYS version and return the result to `compare_ansys.py`.
+1. Open the live VAJRA dashboard or run `python run.py` locally.
+2. Point out the Leh, Ladakh NASA POWER weather provenance and the selected coldest 14-day window.
+3. Show the geometry, wall, roof, floor, opening and thermal-mass controls.
+4. Press **Run** and point to the indoor and outside temperatures, comfort band, minimum point and heat-flow chart.
+5. Change wall insulation and press **Run** again. Every value is recalculated by the solver.
+6. Press **Compare designs**. The table fills one real design at a time and is ranked by heating energy.
+7. Press **Compare wall materials** to show the material sensitivity at fixed insulation.
+8. Open the design sheet to show the generated section, inputs, metrics and weather provenance.
+9. Open the ANSYS panel. Explain that the displayed 2.22 °C maximum and 1.44 °C RMS differences are a recorded Level-A wall-panel cross-check.
+10. Use **Prepare ANSYS files** to download the current design's actual export package for a team-side ANSYS run.
+
+Do not present synthetic weather as a Leh result. Do not claim cost, payback, fuel-efficiency, measured-data or full-shelter ANSYS accuracy.

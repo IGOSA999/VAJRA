@@ -6,12 +6,20 @@ from typing import Iterable
 
 import numpy as np
 
-try:
-    import pvlib  # type: ignore
-    PVLIB_AVAILABLE = True
-except Exception:
-    pvlib = None
-    PVLIB_AVAILABLE = False
+pvlib = None
+PVLIB_AVAILABLE = None
+
+def _get_pvlib():
+    global pvlib, PVLIB_AVAILABLE
+    if PVLIB_AVAILABLE is None:
+        try:
+            import pvlib as _pvlib  # type: ignore
+            pvlib = _pvlib
+            PVLIB_AVAILABLE = True
+        except Exception:
+            pvlib = None
+            PVLIB_AVAILABLE = False
+    return pvlib
 
 
 def _julian_day(dt: datetime) -> float:
@@ -117,14 +125,15 @@ def plane_of_array_fallback(tilt_deg: float, azimuth_deg: float, index, ghi, dhi
 
 
 def plane_of_array(tilt_deg: float, azimuth_deg: float, index, ghi, dhi, dni, lat, lon, albedo=0.2) -> np.ndarray:
-    if PVLIB_AVAILABLE:
+    lib = _get_pvlib()
+    if lib is not None:
         import pandas as pd
         index = pd.DatetimeIndex(list(index))
-        pos = pvlib.solarposition.get_solarposition(index, lat, lon)
+        pos = lib.solarposition.get_solarposition(index, lat, lon)
         zen = pos["apparent_zenith"].to_numpy()
         saz = pos["azimuth"].to_numpy()
-        dni_extra = np.asarray(pvlib.irradiance.get_extra_radiation(index), dtype=float)
-        total = pvlib.irradiance.get_total_irradiance(
+        dni_extra = np.asarray(lib.irradiance.get_extra_radiation(index), dtype=float)
+        total = lib.irradiance.get_total_irradiance(
             tilt_deg, azimuth_deg, zen, saz, np.maximum(dni, 0), np.maximum(ghi, 0), np.maximum(dhi, 0),
             dni_extra=dni_extra, albedo=albedo, model="haydavies")
         return np.maximum(np.asarray(total["poa_global"], dtype=float), 0)

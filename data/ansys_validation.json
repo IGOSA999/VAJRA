@@ -1,7 +1,7 @@
 {
   "status": "completed",
   "solver": "ANSYS Student 2026 R1",
-  "scope": "1 m? transient wall-panel Level A cross-check",
+  "scope": "1 m² transient wall-panel Level A cross-check",
   "warmup_days": 3,
   "points_compared": 4021,
   "max_abs_difference_c": 2.218076,

@@ -1,33 +1,22 @@
-# VAJRA Level A ANSYS run
+# VAJRA Level-A ANSYS cross-check
 
-The dashboard prepares the files in `exports/ansys` for the selected design and weather window.
+VAJRA can export a transient 1 m² wall-panel case from the active design. The package contains the wall macro, boundary tables, material values and the Python wall inner-surface reference series.
 
-Files used by the APDL macro:
+## Team-side run
 
-- `wall_panel.mac`
-- `boundary_conditions_table.txt`
-- `boundary_conditions_table_inside.txt`
+Run `exports/ansys/wall_panel.mac` in ANSYS Student 2026 R1 with the working directory set to `exports/ansys`. The macro uses SOLID278, the exported layer stack and time-dependent convection tables, and writes `ansys_wall_results.csv`.
 
-Supporting files:
-
-- `boundary_conditions.csv`
-- `materials.csv`
-- `python_wall_results.csv`
-
-Open ANSYS Mechanical APDL with the working directory set to `exports/ansys`. Read or execute
-`wall_panel.mac`. The macro uses SOLID278 and a one square metre wall panel with the exact wall
-layer order exported by VAJRA. It applies time-varying outside and inside air temperatures as
-convection bulk temperatures from the tabulated files.
-
-After the solve, the macro writes `ansys_wall_results.csv`. The compare script then reports the
-maximum and RMS difference between the Python wall inner-surface temperature series and the ANSYS
-series:
+Run:
 
 ```text
 python scripts/compare_ansys.py
 ```
 
-The macro has not been run by VAJRA here. Confirm the commands against the installed ANSYS release
-before using the output as a validation result. Current ANSYS documentation identifies SOLID278
-as a 3-D 8-node thermal solid and documents tabular time-dependent convection inputs via `SF`
-and `*DIM`/`*TREAD` tables. See the official ANSYS documentation for the installed release.
+The recorded reference run used a three-day warm-up and 4,021 Python comparison points. It produced:
+
+```text
+maximum absolute difference: 2.218076 C
+RMS difference:              1.437016 C
+```
+
+These numbers describe the Level-A wall-panel cross-check only. They are not full-shelter validation and are not measured-data accuracy claims.

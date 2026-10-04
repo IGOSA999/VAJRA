@@ -1,1 +1,0 @@
-"""VAJRA thermal shelter model."""

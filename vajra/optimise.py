@@ -88,12 +88,33 @@ def _candidate(base: dict, i: int, seed: int = 20261003) -> dict:
     return generate_candidates(base, max(24, i + 1), seed=seed)[i]
 
 
+def _display_description(d):
+    name = str(d.get("name", "baseline"))
+    if name in {"baseline", "Leh reference shelter", "user design"}:
+        return "Baseline"
+    material = d["constructions"]["wall"][-1]["material"].replace("_", " ").title()
+    insulation = next((x["mm"] for x in d["constructions"]["wall"] if x["material"] == "mineral_wool"), 0)
+    orientation = float(d["geometry"].get("azimuth_deg", 0)) % 360
+    directions = [(0,"north"),(45,"north-east"),(90,"east"),(135,"south-east"),(180,"south"),(225,"south-west"),(270,"west"),(315,"north-west")]
+    direction = min(directions, key=lambda x: abs(((orientation-x[0]+180)%360)-180))[1]
+    glazing = "no glazing"
+    if d.get("openings"):
+        glazing = d["openings"][0]["glazing"].replace("_", " ")
+    parts = [material, f"{int(insulation)} mm insulation" if insulation else "uninsulated", f"facing {direction}", glazing]
+    return ", ".join(parts)
+
+
 def _row_from_runs(d, free, heater):
     return {
         "name": d.get("name", "baseline"),
+        "description": _display_description(d),
+        "is_baseline": str(d.get("name", "")) in {"baseline", "Leh reference shelter", "user design"},
         "heating_kwh": round(heater["summary"]["heating_kwh"], 3),
         "heating_kwh_per_m2": round(heater["summary"]["heating_kwh_per_m2"], 3),
         "comfort_hours": round(free["summary"]["comfort_hours"], 2),
+        "t_min_c": round(free["summary"]["t_min_c"], 3),
+        "hours_above_zero": round(free["summary"]["hours_above_zero"], 2),
+        "mean_delta_c": round(free["summary"]["mean_delta_c"], 3),
         "overheat_degree_hours": round(free["summary"]["overheat_degree_hours"], 2),
         "score": round(heater["summary"]["heating_kwh"] + free["summary"]["overheat_degree_hours"], 3),
         "orientation_deg": d["geometry"]["azimuth_deg"],

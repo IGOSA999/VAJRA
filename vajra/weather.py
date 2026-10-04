@@ -68,7 +68,8 @@ def synthetic_leh(days: int = 14) -> WeatherFrame:
         "lw_down_wm2": lw,
     }, index=idx)
     return WeatherFrame(frame, {
-        "source": "synthetic test data",
+        "source": "synthetic test data", "provider": "Synthetic test data", "year": 2024,
+        "expected_hours": len(idx), "present_hours": len(idx),
         "lat": 34.1526, "lon": 77.5771, "elevation_m": 3500,
         "synthetic": True, "missing_hours": 0,
     })
@@ -89,30 +90,42 @@ def load_weather_csv(path: Path) -> WeatherFrame:
     missing = sorted(required - set(df.columns))
     if missing:
         raise ValueError(f"Missing required weather columns: {', '.join(missing)}")
+
     out = pd.DataFrame(index=ts)
     out["t_air_c"] = pd.to_numeric(df["t_air_c"], errors="coerce").to_numpy()
     out["ghi_wm2"] = pd.to_numeric(df["ghi_wm2"], errors="coerce").to_numpy()
-    defaults = {
-        "rh_pct": 25.0, "wind10_ms": 2.0, "pressure_kpa": 66.0,
-        "dhi_wm2": np.nan, "dni_wm2": np.nan, "lw_down_wm2": np.nan,
-    }
+    defaults = {"rh_pct":25.0,"wind10_ms":2.0,"pressure_kpa":66.0,"dhi_wm2":np.nan,"dni_wm2":np.nan,"lw_down_wm2":np.nan}
     for c, default in defaults.items():
         out[c] = pd.to_numeric(df[c], errors="coerce").to_numpy() if c in df.columns else default
-    out = out.sort_index()
+    out = out[~out.index.duplicated(keep="first")].sort_index()
     if out["t_air_c"].isna().any() or out["ghi_wm2"].isna().any():
-        bad = out.index[out[["t_air_c", "ghi_wm2"]].isna().any(axis=1)][0]
+        bad = out.index[out[["t_air_c","ghi_wm2"]].isna().any(axis=1)][0]
         raise ValueError(f"Required weather value missing at timestamp {bad.isoformat()}")
     if out["dhi_wm2"].isna().any() or out["dni_wm2"].isna().any():
         from .solar import erbs_decompose
-        dhi, dni = erbs_decompose(out["ghi_wm2"].to_numpy(), ts)
+        dhi, dni = erbs_decompose(out["ghi_wm2"].to_numpy(), out.index)
         out["dhi_wm2"] = np.where(out["dhi_wm2"].isna(), dhi, out["dhi_wm2"])
         out["dni_wm2"] = np.where(out["dni_wm2"].isna(), dni, out["dni_wm2"])
     out["lw_down_wm2"] = out["lw_down_wm2"].interpolate().bfill().ffill().fillna(240.0)
-    return WeatherFrame(out, {
-        "source": str(path.name), "lat": None, "lon": None, "elevation_m": None,
-        "synthetic": False, "missing_hours": int(out.isna().any(axis=1).sum()),
-    })
 
+    years = sorted(set(out.index.year.tolist()))
+    year = years[0] if len(years) == 1 else None
+    if "latitude" in df.columns:
+        lat_values = pd.to_numeric(df["latitude"], errors="coerce").dropna().unique()
+        lat = float(lat_values[0]) if len(lat_values) else None
+    else: lat = None
+    if "longitude" in df.columns:
+        lon_values = pd.to_numeric(df["longitude"], errors="coerce").dropna().unique()
+        lon = float(lon_values[0]) if len(lon_values) else None
+    else: lon = None
+    if "elevation_m" in df.columns:
+        elev_values = pd.to_numeric(df["elevation_m"], errors="coerce").dropna().unique()
+        elevation = float(elev_values[0]) if len(elev_values) else None
+    else: elevation = None
+    provider = "Uploaded weather file"
+    expected = int(8784 if year is not None and pd.Timestamp(f"{year}-12-31").is_leap_year else 8760) if year else len(out)
+    present = len(out)
+    return WeatherFrame(out, {"source":path.name,"provider":provider,"year":year,"expected_hours":expected,"present_hours":present,"lat":lat,"lon":lon,"elevation_m":elevation,"synthetic":False,"missing_hours":max(0,expected-present)})
 
 def select_window(weather: WeatherFrame, days: int | None) -> WeatherFrame:
     if days is None:
@@ -170,7 +183,12 @@ def load_nasa_csv(path: Path, lat: float, lon: float, elevation_m: float = 3500.
         dhi, dni = erbs_decompose(df["ghi_wm2"].fillna(0).to_numpy(), df.index)
         df["dhi_wm2"] = df["dhi_wm2"].fillna(pd.Series(dhi, index=df.index))
         df["dni_wm2"] = df["dni_wm2"].fillna(pd.Series(dni, index=df.index))
+    present = len(df)
+    first_year = int(df.index[0].year) if len(df.index) else None
+    expected = 8784 if first_year and first_year % 4 == 0 and (first_year % 100 != 0 or first_year % 400 == 0) else 8760
     return WeatherFrame(df, {
-        "source": path.name, "lat": lat, "lon": lon, "elevation_m": elevation_m,
+        "source": path.name, "provider": "NASA POWER", "year": first_year,
+        "expected_hours": expected, "present_hours": present,
+        "lat": lat, "lon": lon, "elevation_m": elevation_m,
         "synthetic": False, "missing_hours": missing,
     })

@@ -1,120 +1,47 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VAJRA thermal shelter model</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <main class="app">
-    <header class="topline">
-      <div class="tool-title">VAJRA thermal shelter model</div>
-      <div id="weather-line" class="mono">Weather: loading</div>
-    </header>
-
-    <div id="synthetic-banner" class="notice" hidden>This screen uses synthetic test data. Run scripts/fetch_weather.py on a machine with internet access before presenting a Leh result.</div>
-
-    <section class="workspace">
-      <aside class="inputs panel">
-        <h2>Site and weather</h2>
-        <label>Latitude (°)<input id="lat" type="number" step="0.0001" value="34.1526"></label>
-        <label>Longitude (°)<input id="lon" type="number" step="0.0001" value="77.5771"></label>
-        <label>Weather period<select id="period"><option value="14">14 day test window</option><option value="30">30 day window</option><option value="365">Full year</option></select></label>
-        <label>Weather CSV<input id="weather_file" type="file" accept=".csv,text/csv"></label>
-        <button id="upload-weather" class="secondary">Use uploaded weather</button>
-
-        <h2>Geometry</h2>
-        <label>Length (m)<input id="length" type="number" step="0.1" value="4"></label>
-        <label>Width (m)<input id="width" type="number" step="0.1" value="3"></label>
-        <label>Wall height (m)<input id="height" type="number" step="0.1" value="2.4"></label>
-        <label>Main facade azimuth (°)<input id="azimuth" type="number" step="1" value="180"></label>
-        <label>Roof<select id="roof_type"><option value="mono_pitch">Mono-pitch</option><option value="flat">Flat</option><option value="gable">Gable</option></select></label>
-        <label>Roof pitch (°)<input id="pitch" type="number" step="1" value="15"></label>
-
-        <h2>Walls, outside to inside</h2>
-        <label>Wall material<select id="wall_material"></select></label>
-        <label>Wall thickness (mm)<input id="wall_mm" type="number" step="5" value="300"></label>
-        <label>Outside insulation (mm)<input id="insulation_mm" type="number" step="10" value="0"></label>
-
-        <h2>Roof and floor</h2>
-        <label>Roof material<select id="roof_material"></select></label>
-        <label>Roof layer (mm)<input id="roof_mm" type="number" step="5" value="100"></label>
-        <label>Floor material<select id="floor_material"></select></label>
-        <label>Floor thickness (mm)<input id="floor_mm" type="number" step="5" value="100"></label>
-
-        <h2>Openings</h2>
-        <label>Window width (m)<input id="win_w" type="number" step="0.1" value="1.8"></label>
-        <label>Window height (m)<input id="win_h" type="number" step="0.1" value="1.2"></label>
-        <label>Glazing<select id="glazing"></select></label>
-        <label>Night cover<select id="cover"><option value="yes">Closed 17:00 to 09:00</option><option value="no">None</option></select></label>
-
-        <h2>Interior mass</h2>
-        <label>Mass type<select id="mass_type"><option value="none">None</option><option value="water">Water</option><option value="pcm">Paraffin PCM</option></select></label>
-        <label>Mass (kg)<input id="mass_kg" type="number" step="1" value="500"></label>
-        <label>Mass surface area (m²)<input id="mass_area" type="number" step="0.1" value="5"></label>
-        <label>Mass inside coefficient (W/m²K)<input id="mass_h" type="number" step="0.1" value="2.5"></label>
-        <label>PCM latent heat (kJ/kg)<input id="pcm_latent" type="number" step="1" value="200"></label>
-        <label>PCM melt low (°C)<input id="pcm_low" type="number" step="0.5" value="16"></label>
-        <label>PCM melt high (°C)<input id="pcm_high" type="number" step="0.5" value="20"></label>
-
-        <h2>Ventilation</h2>
-        <label>Infiltration (ACH)<input id="infiltration" type="number" step="0.1" value="0.5"></label>
-        <label>Ventilation (ACH)<input id="vent" type="number" step="0.1" value="0"></label>
-        <label>Ventilation hours<input id="vent_hours" value="11,15"></label>
-
-        <h2>Comfort band</h2>
-        <label>Low (°C)<input id="comfort_low" type="number" step="1" value="15"></label>
-        <label>High (°C)<input id="comfort_high" type="number" step="1" value="28"></label>
-        <div class="help">Placeholder values from the project brief. Agree and state the band before presentation.</div>
-        <button id="run">Run</button>
-        <button id="compare" class="secondary">Compare designs</button>
-        <button id="compare-materials" class="secondary">Compare wall materials</button>
-        <button id="sheet" class="secondary">Open design sheet</button>
-        <button id="ansys" class="secondary">Prepare &amp; download ANSYS package</button>
-      </aside>
-
-      <section class="results">
-        <div id="run-status" class="status">Loading...</div>
-        <section class="panel plot-panel">
-          <h2>Indoor and ambient air temperature</h2>
-          <div id="temp-chart" class="chart"></div>
-        </section>
-        <div class="mid-grid">
-          <section class="panel">
-            <h2>Shelter section, drawn to scale</h2>
-            <div id="drawing"></div>
-          </section>
-          <section class="panel">
-            <h2>Heat flow by element</h2>
-            <div id="flow-chart" class="chart small"></div>
-          </section>
-        </div>
-        <section class="panel metrics" id="metrics"></section>
-        <section class="panel ansys-panel">
-          <div class="ansys-heading">
-            <div>
-              <h2>ANSYS Level A cross-check</h2>
-              <div class="help">Recorded validation of the exported transient wall panel.</div>
-            </div>
-            <span id="ansys-badge" class="badge">Loading</span>
-          </div>
-          <div id="ansys-metrics" class="ansys-metrics"></div>
-          <div id="ansys-note" class="help"></div>
-        </section>
-
-        <section class="panel">
-          <h2>Design comparison</h2>
-          <div class="table-wrap"><table id="compare-table"><thead></thead><tbody><tr><td>No run yet. Choose a design and press Run.</td></tr></tbody></table></div>
-        </section>
-        <section class="panel">
-          <h2>Wall material comparison</h2>
-          <div class="table-wrap"><table id="material-table"><thead></thead><tbody><tr><td>No material comparison yet. Press Compare wall materials.</td></tr></tbody></table></div>
-        </section>
-      </section>
-    </section>
-  </main>
-  <script src="/static/vendor/plotly.min.js"></script>
-  <script src="/static/app.js"></script>
-</body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VAJRA thermal shelter model</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/static/app.css"></head>
+<body><main class="app">
+<header class="topline"><div class="tool-title">VAJRA thermal shelter model</div><div id="weather-line" class="weather-meta"><div>Weather: loading</div></div></header>
+<div id="synthetic-banner" class="notice" hidden>This screen uses synthetic test data. Do not present it as a Leh result.</div>
+<section class="workspace">
+<aside class="inputs panel">
+<form id="design-form">
+<details open><summary>Site and weather</summary>
+<div id="site-readout" class="site-readout">Leh, Ladakh</div>
+<label>Weather period<select id="period"><option value="14">Coldest 14 days</option><option value="30">30-day window</option><option value="365">Full year</option></select></label>
+<label>Weather source<select id="weather_source"><option value="leh">Leh, 2024 (NASA POWER)</option><option value="upload">Upload a CSV</option></select></label>
+<div id="upload-block" hidden><label class="file-button">Choose weather CSV<input id="weather_file" type="file" accept=".csv,text/csv"></label><button type="button" id="upload-weather" class="secondary">Use uploaded weather</button></div>
+</details>
+<details open><summary>Geometry</summary>
+<label>Length (m)<input id="length" type="number" step="0.1" value="4"></label><label>Width (m)<input id="width" type="number" step="0.1" value="3"></label>
+<label>Wall height (m)<input id="height" type="number" step="0.1" value="2.4"></label><label>Glazed facade azimuth (°)<input id="azimuth" type="number" step="1" value="180"></label>
+<label>Roof<select id="roof_type"><option value="mono_pitch">Mono-pitch</option><option value="flat">Flat</option><option value="gable">Gable</option></select></label><label>Roof pitch (°)<input id="pitch" type="number" step="1" value="15"></label>
+</details>
+<details><summary>Walls</summary>
+<label>Wall material<select id="wall_material"></select></label><label>Wall thickness (mm)<input id="wall_mm" type="number" step="5" value="300"></label><label>Outside insulation (mm)<input id="insulation_mm" type="number" step="10" value="0"></label>
+</details>
+<details><summary>Roof and floor</summary>
+<label>Roof material<select id="roof_material"></select></label><label>Roof layer (mm)<input id="roof_mm" type="number" step="5" value="100"></label><label>Floor material<select id="floor_material"></select></label><label>Floor thickness (mm)<input id="floor_mm" type="number" step="5" value="100"></label>
+</details>
+<details><summary>Openings</summary>
+<label>Window width (m)<input id="win_w" type="number" step="0.1" value="1.8"></label><label>Window height (m)<input id="win_h" type="number" step="0.1" value="1.2"></label><label>Glazing<select id="glazing"></select></label><label>Night cover<select id="cover"><option value="yes">Closed 17:00 to 09:00</option><option value="no">None</option></select></label>
+</details>
+<details><summary>Interior mass</summary>
+<label>Mass type<select id="mass_type"><option value="none">None</option><option value="water">Water</option><option value="pcm">Paraffin PCM</option></select></label>
+<div id="mass-fields" hidden><label>Mass (kg)<input id="mass_kg" type="number" step="1" value="500"></label><label>Mass surface area (m²)<input id="mass_area" type="number" step="0.1" value="5"></label><label>Mass inside coefficient (W/m²K)<input id="mass_h" type="number" step="0.1" value="2.5"></label></div>
+<div id="pcm-fields" hidden><label>PCM latent heat (kJ/kg)<input id="pcm_latent" type="number" step="1" value="200"></label><label>PCM melt low (°C)<input id="pcm_low" type="number" step="0.5" value="16"></label><label>PCM melt high (°C)<input id="pcm_high" type="number" step="0.5" value="20"></label></div>
+</details>
+<details><summary>Ventilation</summary><label>Infiltration (ACH)<input id="infiltration" type="number" step="0.1" value="0.5"></label><label>Ventilation (ACH)<input id="vent" type="number" step="0.1" value="0"></label><div class="two-col"><label>From hour<input id="vent_start" type="number" min="0" max="23" step="1" value="11"></label><label>To hour<input id="vent_end" type="number" min="1" max="24" step="1" value="15"></label></div></details>
+<details><summary>Comfort band</summary><div class="two-col"><label>Low (°C)<input id="comfort_low" type="number" step="1" value="15"></label><label>High (°C)<input id="comfort_high" type="number" step="1" value="28"></label></div><div class="help">Project input: confirm the comfort band with the team before presentation.</div></details>
+<div class="action-bar"><button type="button" id="run">Run</button><button type="button" id="compare" class="secondary">Compare designs</button><button type="button" id="compare-materials" class="secondary">Compare wall materials</button><button type="button" id="sheet" class="secondary">Open design sheet</button><button type="button" id="ansys" class="secondary">Prepare ANSYS files</button></div>
+</form></aside>
+<section class="results"><div id="run-status" class="status">Starting...</div><button id="cancel-job" class="secondary cancel" hidden>Cancel</button>
+<section class="panel plot-panel"><h2>Indoor and outside air temperature</h2><div id="temp-chart" class="chart"></div></section>
+<div class="mid-grid"><section class="panel"><h2>Shelter section</h2><div id="drawing"></div></section><section class="panel"><h2>Heat flow by element</h2><div id="flow-chart" class="chart small"></div><div id="solar-table"></div></section></div>
+<section class="panel metrics" id="metrics"></section>
+<section class="panel ansys-panel"><div class="panel-head"><div><h2>ANSYS Level A cross-check</h2><div class="help">Recorded reference validation for the exported 1 m² wall panel.</div></div><span id="ansys-badge" class="badge">Loading</span></div><div id="ansys-metrics" class="ansys-metrics"></div><div id="ansys-note" class="help"></div></section>
+<section class="panel"><div class="panel-head"><div><h2>Design comparison</h2><div id="compare-caption" class="table-caption"></div></div></div><div class="table-wrap"><table id="compare-table"><thead></thead><tbody><tr><td>Run Compare designs to simulate seven designs.</td></tr></tbody></table></div></section>
+<section class="panel"><div class="panel-head"><div><h2>Wall material comparison</h2><div id="material-caption" class="table-caption"></div></div></div><div class="table-wrap"><table id="material-table"><thead></thead><tbody><tr><td>Run Compare wall materials to simulate six materials.</td></tr></tbody></table></div></section>
+</section></section></main>
+<script src="/static/vendor/plotly.min.js"></script><script src="/static/labels.js"></script><script src="/static/app.js"></script></body></html>

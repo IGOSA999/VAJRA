@@ -1,71 +1,150 @@
 let materials = null;
 let currentResult = null;
 let currentDesign = null;
-const $ = (id) => document.getElementById(id);
+let currentWeatherMeta = null;
+let activeJobId = null;
+let statusTimer = null;
+let statusStartedAt = 0;
+const tableState = {};
+const $ = id => document.getElementById(id);
 
-async function getJSON(url, options) {
-  const response = await fetch(url, options);
+async function getJSON(url, options = {}) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (_) {
+    throw new Error("Could not reach the server.");
+  }
   if (!response.ok) {
-    const body = await response.json().catch(() => ({detail: response.statusText}));
-    throw new Error(body.detail || response.statusText);
+    let detail = "";
+    const type = response.headers.get("content-type") || "";
+    if (type.includes("application/json")) {
+      const body = await response.json().catch(() => ({}));
+      detail = String(body.detail || "").trim();
+    }
+    const wake = [502, 503, 504].includes(response.status)
+      ? " The service may still be waking up. Wait a minute and try again."
+      : "";
+    throw new Error(`The server returned an error (HTTP ${response.status}).${detail ? ` ${detail}` : wake}`);
   }
   return response.json();
 }
 
-function populateSelect(id, values) {
-  const select = $(id);
-  select.innerHTML = "";
-  Object.keys(values).forEach((name) => {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    select.appendChild(option);
-  });
+async function waitForHealth() {
+  let warned = false;
+  while (true) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      await getJSON("/api/health", {signal: controller.signal});
+      clearTimeout(timer);
+      return;
+    } catch (_) {
+      if (!warned) { setStatus("Waking the server. This can take about a minute on the free plan."); warned = true; }
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  }
 }
 
 function selectedDays() { return Number($("period").value); }
-
-function setStatus(message, error=false) {
+function useColdest() { return selectedDays() === 14; }
+function weatherSource() { return $("weather_source").value === "upload" ? "upload" : "bundled"; }
+function setStatus(message, error = false) {
   const el = $("run-status");
-  el.textContent = message;
+  const value = String(message || "").trim() || "The server returned an unexpected empty message.";
+  el.textContent = value;
   el.className = error ? "status error" : "status";
 }
-
-function setBusy(busy, activeId=null) {
-  ["run", "compare", "compare-materials", "sheet", "ansys", "upload-weather"].forEach((id) => {
-    const button = $(id);
-    button.disabled = busy;
-    if (id === activeId && busy) button.textContent = "Computing...";
-  });
-  if (!busy) {
-    $("run").textContent = "Run";
-    $("compare").textContent = "Compare designs";
-    $("compare-materials").textContent = "Compare wall materials";
-    $("sheet").textContent = "Open design sheet";
-    $("ansys").textContent = "Prepare & download ANSYS package";
-    $("upload-weather").textContent = "Use uploaded weather";
-  }
+function startStatusClock(label) {
+  stopStatusClock();
+  statusStartedAt = performance.now();
+  statusTimer = setInterval(() => {
+    const seconds = Math.floor((performance.now() - statusStartedAt) / 1000);
+    setStatus(`${label}: Running, ${seconds} s so far.`);
+  }, 1000);
 }
-
-function collectDesign() {
-  for (const [id, label] of [["wall_material", "wall"], ["roof_material", "roof"], ["floor_material", "floor"], ["glazing", "glazing"]]) {
-    if (!$(id).value) throw new Error(`Choose a ${label} material first. The material list is still loading.`);
+function stopStatusClock() {
+  if (statusTimer) clearInterval(statusTimer);
+  statusTimer = null;
+}
+function setBusy(busy) {
+  ["run", "compare", "compare-materials", "sheet", "ansys", "upload-weather"].forEach(id => {
+    const b = $(id);
+    if (b) b.disabled = busy;
+  });
+}
+function populateSelect(id, values) {
+  const select = $(id);
+  select.innerHTML = "";
+  Object.entries(values).forEach(([key, obj]) => {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = obj.label || humanize(key);
+    select.appendChild(option);
+  });
+}
+function formatDateRange(period) {
+  if (!period || period.length < 2) return "the selected period";
+  const a = new Date(period[0]);
+  const b = new Date(period[1]);
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  if (a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()) {
+    return `${a.getDate()} to ${b.getDate()} ${months[a.getMonth()]} ${a.getFullYear()}`;
   }
-  const [ventStart, ventEnd] = $("vent_hours").value.split(",").map(Number);
+  return `${a.getDate()} ${months[a.getMonth()]} ${a.getFullYear()} to ${b.getDate()} ${months[b.getMonth()]} ${b.getFullYear()}`;
+}
+function updateProvenance(meta) {
+  currentWeatherMeta = meta || {};
+  const provider = meta.provider || meta.weather_source || "Weather input";
+  const name = provider === "NASA POWER" ? "Leh, Ladakh" : provider === "Uploaded weather file" ? `Your file: ${meta.source}` : "Weather input";
+  const lat = Number.isFinite(Number(meta.lat)) ? `${Number(meta.lat).toFixed(2)}° N` : "site coordinates not supplied";
+  const lon = Number.isFinite(Number(meta.lon)) ? `${Number(meta.lon).toFixed(2)}° E` : "";
+  const elev = Number.isFinite(Number(meta.elevation_m)) ? `${Number(meta.elevation_m).toLocaleString("en-IN")} m` : "";
+  $("weather-line").innerHTML = `<div>${name}. ${lat}${lon ? `, ${lon}` : ""}${elev ? `, ${elev}` : ""}</div><div>${provider}${meta.year ? `, ${meta.year}` : ""}. ${Number(meta.present_hours || 0).toLocaleString()} of ${Number(meta.expected_hours || meta.present_hours || 0).toLocaleString()} hours present${meta.missing_hours ? `, ${meta.missing_hours} missing` : ""}.</div>`;
+  $("site-readout").textContent = `${name}. ${lat}${lon ? `, ${lon}` : ""}${elev ? `, ${elev}` : ""}`;
+  $("synthetic-banner").hidden = !meta.synthetic;
+}
+function setMassVisibility() {
+  const type = $("mass_type").value;
+  $("mass-fields").hidden = type === "none";
+  $("pcm-fields").hidden = type !== "pcm";
+}
+function syncSource() {
+  $("upload-block").hidden = $("weather_source").value !== "upload";
+}
+function collectDesign() {
+  const lat = Number(currentWeatherMeta?.lat);
+  const lon = Number(currentWeatherMeta?.lon);
+  const elevation = Number(currentWeatherMeta?.elevation_m);
+  if (![lat, lon, elevation].every(Number.isFinite)) {
+    throw new Error("The active weather source does not provide site coordinates and elevation for the solar calculation.");
+  }
+  const from = Number($("vent_start").value);
+  const to = Number($("vent_end").value);
+  if (!(from >= 0 && from <= 23 && to >= 1 && to <= 24 && from < to)) {
+    throw new Error("Ventilation hours must have a start before the end.");
+  }
   const massType = $("mass_type").value;
   const interiorMass = massType === "none" ? null : {
     material: massType === "water" ? "water" : "pcm_paraffin",
     kg: Number($("mass_kg").value),
     surface_area_m2: Number($("mass_area").value),
     h_inside_w_m2k: Number($("mass_h").value),
-    ...(massType === "pcm" ? {latent_heat_j_kg: Number($("pcm_latent").value) * 1000, melt_low_c: Number($("pcm_low").value), melt_high_c: Number($("pcm_high").value)} : {})
+    ...(massType === "pcm" ? {
+      latent_heat_j_kg: Number($("pcm_latent").value) * 1000,
+      melt_low_c: Number($("pcm_low").value),
+      melt_high_c: Number($("pcm_high").value)
+    } : {})
   };
   return {
     name: "user design",
-    site: {lat: Number($("lat").value), lon: Number($("lon").value), elevation_m: 3500},
+    site: {lat, lon, elevation_m: elevation},
     geometry: {
-      length_m: Number($("length").value), width_m: Number($("width").value), wall_height_m: Number($("height").value),
-      roof: {type: $("roof_type").value, pitch_deg: Number($("pitch").value), high_side: "N"}, azimuth_deg: Number($("azimuth").value)
+      length_m: Number($("length").value),
+      width_m: Number($("width").value),
+      wall_height_m: Number($("height").value),
+      roof: {type: $("roof_type").value, pitch_deg: Number($("pitch").value), high_side: "N"},
+      azimuth_deg: Number($("azimuth").value)
     },
     constructions: {
       wall: [
@@ -74,13 +153,13 @@ function collectDesign() {
       ],
       roof: [{material: $("roof_material").value, mm: Number($("roof_mm").value)}],
       floor: [{material: $("floor_material").value, mm: Number($("floor_mm").value)}],
-      ground: {soil_depth_m: 2.0}
+      ground: {soil_depth_m: 2}
     },
     openings: Number($("win_w").value) > 0 && Number($("win_h").value) > 0 ? [{
       facade: "main", width_m: Number($("win_w").value), height_m: Number($("win_h").value), glazing: $("glazing").value,
       night_cover: $("cover").value === "yes" ? {r_m2k_per_w: 0.8, from_hour: 17, to_hour: 9} : {}
     }] : [],
-    air: {infiltration_ach: Number($("infiltration").value), vent_ach: Number($("vent").value), vent_hours: [ventStart, ventEnd]},
+    air: {infiltration_ach: Number($("infiltration").value), vent_ach: Number($("vent").value), vent_hours: [from, to]},
     internal_gains_w: 0,
     solar_split: {floor_and_mass: 0.7},
     comfort: {low_c: Number($("comfort_low").value), high_c: Number($("comfort_high").value)},
@@ -89,221 +168,287 @@ function collectDesign() {
     interior_mass: interiorMass
   };
 }
-
+function formatValue(key, value) {
+  if (!Number.isFinite(value)) return "";
+  if (key === "heating_kwh") return value.toFixed(0);
+  if (key === "heating_kwh_per_m2") return value.toFixed(1);
+  if (key === "hours_above_zero" || key === "overheat_degree_hours") return value.toFixed(0);
+  if (key === "orientation_deg" || key === "insulation_mm") return value.toFixed(0);
+  if (key === "t_min_c" || key === "mean_delta_c") return value.toFixed(1);
+  return value.toFixed(1);
+}
+function makeTableRows(rows, keys, tableId) {
+  const state = tableState[tableId] || {key: "heating_kwh", dir: "asc"};
+  const copy = [...rows];
+  copy.sort((a, b) => {
+    const av = a[state.key], bv = b[state.key];
+    const an = Number(av), bn = Number(bv);
+    const cmp = Number.isFinite(an) && Number.isFinite(bn) ? an - bn : String(av ?? "").localeCompare(String(bv ?? ""));
+    return state.dir === "asc" ? cmp : -cmp;
+  });
+  return copy;
+}
+function renderTable(id, captionId, rows, materialMode = false, period = null) {
+  const keys = materialMode
+    ? ["description","status","t_min_c","mean_delta_c","heating_kwh","heating_kwh_per_m2","hours_above_zero","overheat_degree_hours","insulation_mm","wall_material","glazing"]
+    : ["description","status","t_min_c","mean_delta_c","heating_kwh","heating_kwh_per_m2","hours_above_zero","overheat_degree_hours","orientation_deg","insulation_mm","wall_material","glazing"];
+  const sortedByEnergy = [...rows].sort((a,b) => Number(a.heating_kwh)-Number(b.heating_kwh));
+  const lowest = sortedByEnergy[0]?.heating_kwh;
+  const displayRows = rows.map(r => ({...r, status: `${r.is_baseline ? "Baseline" : ""}${r.is_baseline && r.heating_kwh === lowest ? " · " : ""}${r.heating_kwh === lowest ? "Lowest" : ""}`.trim() || ""}));
+  const caption = materialMode
+    ? `Six wall materials on the same ${formatDateRange(period || currentResult?.meta?.period)}. Ranked by heating energy.`
+    : `Seven designs on the same ${formatDateRange(period || currentResult?.meta?.period)}. Ranked by heating energy.`;
+  $(captionId).textContent = caption;
+  const table = $(id);
+  table.innerHTML = `<thead><tr>${keys.map((key, index) => `<th data-sort-key="${key}" class="${index === 0 ? "sticky-col" : "num"} sortable" scope="col">${index === 0 ? "Design" : columnLabel(key)}${tableState[id]?.key === key ? (tableState[id].dir === "asc" ? " ↑" : " ↓") : ""}</th>`).join("")}</tr></thead><tbody>${makeTableRows(displayRows, keys, id).map(r => `<tr>${keys.map((key, index) => { const value = key === "description" ? r[key] || "Design" : key === "status" ? r[key] : key === "wall_material" || key === "glazing" ? humanize(r[key]) : formatValue(key, Number(r[key])); return `<td class="${index === 0 ? "sticky-col" : "num"}">${value}</td>`; }).join("")}</tr>`).join("")}</tbody>`;
+  table.querySelectorAll("th.sortable").forEach(th => th.addEventListener("click", () => {
+    const key = th.dataset.sortKey;
+    const current = tableState[id] || {key: key, dir: "asc"};
+    tableState[id] = {key, dir: current.key === key && current.dir === "asc" ? "desc" : "asc"};
+    renderTable(id, captionId, rows, materialMode, period);
+  }));
+}
+function renderCompare(rows, period = null) { renderTable("compare-table", "compare-caption", rows, false, period); }
+function renderMaterialCompare(rows, period = null) { renderTable("material-table", "material-caption", rows, true, period); }
+function buildNightShapes(result) {
+  const shapes = [];
+  const night = result.series.is_night || [];
+  const x = result.series.time_ist || result.series.time;
+  let start = null;
+  for (let i = 0; i < night.length; i++) {
+    if (night[i] && start === null) start = x[i];
+    const ends = start !== null && (!night[i + 1] || i === night.length - 1);
+    if (ends) { shapes.push({type:"rect", xref:"x", x0:start, x1:x[i], yref:"paper", y0:0, y1:1, fillcolor:"#D9D4C8", opacity:0.24, line:{width:0}, layer:"below"}); start = null; }
+  }
+  return shapes;
+}
 function plotResult(result) {
-  const x = result.series.time.map(t => new Date(t));
-  const comfortLow = Number($("comfort_low").value);
-  const comfortHigh = Number($("comfort_high").value);
-  const traces = [
-    {x, y: result.series.t_air_in_c, mode:"lines", name:"Indoor", line:{color:"#1E2125",width:2}},
-    {x, y: result.series.t_air_out_c, mode:"lines", name:"Outside", line:{color:"#2E5E7E",width:1.5}}
+  const x = result.series.time_ist || result.series.time;
+  const indoor = result.series.t_air_in_c;
+  const outside = result.series.t_air_out_c;
+  const low = Number($("comfort_low").value), high = Number($("comfort_high").value);
+  const minIdx = indoor.reduce((best, value, idx) => value < indoor[best] ? idx : best, 0);
+  const shapes = [{type:"rect",xref:"paper",x0:0,x1:1,y0:low,y1:high,fillcolor:"#E4DFD2",line:{width:0},layer:"below"}, ...buildNightShapes(result)];
+  const annotations = [
+    {x:x[x.length-1],y:indoor[indoor.length-1],xref:"x",yref:"y",text:"Indoor",showarrow:false,xanchor:"left",xshift:8,font:{size:11}},
+    {x:x[x.length-1],y:outside[outside.length-1],xref:"x",yref:"y",text:"Outside",showarrow:false,xanchor:"left",xshift:8,font:{size:11}},
+    {x:x[minIdx],y:indoor[minIdx],xref:"x",yref:"y",text:`Minimum ${indoor[minIdx].toFixed(1)} °C`,showarrow:true,arrowhead:2,ax:35,ay:-35,font:{size:10}},
+    {xref:"paper",x:0.01,y:high-0.7,text:`Comfort band ${low} to ${high} °C`,showarrow:false,xanchor:"left",font:{size:10}}
   ];
-  Plotly.react("temp-chart", traces, {
-    margin:{l:45,r:60,t:10,b:42}, paper_bgcolor:"#FBFAF6", plot_bgcolor:"#FBFAF6",
-    font:{family:"IBM Plex Sans",color:"#1E2125",size:12}, hovermode:"x unified", showlegend:false,
-    xaxis:{gridcolor:"#CFC8BA"}, yaxis:{title:"Temperature (°C)",gridcolor:"#CFC8BA"},
-    shapes:[{type:"rect",xref:"paper",x0:0,x1:1,y0:comfortLow,y1:comfortHigh,fillcolor:"#E4DFD2",line:{width:0},layer:"below"}]
+  Plotly.react("temp-chart", [
+    {x,y:indoor,mode:"lines",name:"Indoor",line:{color:"#1E2125",width:2},hovertemplate:"%{y:.1f} °C<extra>Indoor</extra>"},
+    {x,y:outside,mode:"lines",name:"Outside",line:{color:"#2E5E7E",width:1.5},hovertemplate:"%{y:.1f} °C<extra>Outside</extra>"}
+  ], {
+    margin:{l:50,r:85,t:12,b:55},paper_bgcolor:"#FBFAF6",plot_bgcolor:"#FBFAF6",font:{family:"IBM Plex Sans",color:"#1E2125",size:12},hovermode:"x unified",showlegend:false,annotations,shapes,
+    xaxis:{title:"Time (IST)",gridcolor:"#CFC8BA",tickformat:"%d %b",hoverformat:"%d %b %H:%M"},
+    yaxis:{title:"Temperature (°C)",gridcolor:"#CFC8BA"}
   }, {displayModeBar:false,responsive:true});
+
   const totals = result.summary.flow_totals_kwh || {};
-  Plotly.react("flow-chart", [{x:Object.keys(totals), y:Object.values(totals), type:"bar", marker:{color:"#B5521B"}}], {
-    margin:{l:50,r:10,t:10,b:65}, paper_bgcolor:"#FBFAF6", plot_bgcolor:"#FBFAF6",
-    font:{family:"IBM Plex Sans",color:"#1E2125",size:12}, xaxis:{gridcolor:"#CFC8BA"}, yaxis:{title:"Heat flow (kWh)",gridcolor:"#CFC8BA"}
+  const entries = Object.entries(totals).sort((a,b) => Math.abs(b[1]) - Math.abs(a[1]));
+  Plotly.react("flow-chart", [{y:entries.map(e=>flowLabel(e[0])),x:entries.map(e=>e[1]),type:"bar",orientation:"h",text:entries.map(e=>Number(e[1]).toFixed(1)),textposition:"outside",cliponaxis:false,marker:{color:entries.map(e=>e[1]>=0?"#B5521B":"#2E5E7E")}}], {
+    margin:{l:105,r:55,t:8,b:55},paper_bgcolor:"#FBFAF6",plot_bgcolor:"#FBFAF6",font:{family:"IBM Plex Sans",color:"#1E2125",size:11},
+    xaxis:{title:"Net heat flow over the period (kWh). Positive means heat entering the room.",gridcolor:"#CFC8BA",zeroline:true,zerolinecolor:"#1E2125"},yaxis:{gridcolor:"#CFC8BA"}
   }, {displayModeBar:false,responsive:true});
-}
 
-function drawSection(design) {
-  const g = design.geometry;
-  const scale = 55;
-  const bodyW = Math.min(470, g.width_m * scale);
-  const bodyH = Math.min(210, g.wall_height_m * scale);
-  const wallText = design.constructions.wall.map(x => `${x.material} ${x.mm} mm`).join(", ");
-  const roofText = design.constructions.roof.map(x => `${x.material} ${x.mm} mm`).join(", ");
-  const massText = design.interior_mass ? `${design.interior_mass.material} ${design.interior_mass.kg} kg` : "no interior mass";
-  $("drawing").innerHTML = `<svg viewBox="0 0 560 330" aria-label="Shelter section drawing">
-    <rect x="35" y="${220-bodyH}" width="${bodyW}" height="${bodyH}" fill="#FBFAF6" stroke="#1E2125" stroke-width="1.2"/>
-    <rect x="55" y="${240-bodyH}" width="${Math.max(60,bodyW-40)}" height="${Math.max(70,bodyH-20)}" fill="#F5F2EB" stroke="#1E2125" stroke-width="0.8"/>
-    <line x1="35" y1="${220-bodyH}" x2="${35+bodyW}" y2="${205-bodyH}" stroke="#1E2125" stroke-width="1.2"/>
-    <line x1="${35+bodyW}" y1="${205-bodyH}" x2="${35+bodyW}" y2="220" stroke="#1E2125" stroke-width="1.2"/>
-    <line x1="65" y1="244" x2="485" y2="244" stroke="#CFC8BA" stroke-width="1"/>
-    <text x="65" y="264" font-family="IBM Plex Mono" font-size="11" fill="#1E2125">${wallText}</text>
-    <text x="65" y="282" font-family="IBM Plex Mono" font-size="11" fill="#5E6368">roof: ${roofText}</text>
-    <text x="65" y="300" font-family="IBM Plex Mono" font-size="11" fill="#5E6368">mass: ${massText}</text>
-    <text x="465" y="150" font-family="IBM Plex Mono" font-size="11" fill="#1E2125">N</text>
-    <line x1="475" y1="190" x2="475" y2="160" stroke="#1E2125" stroke-width="1.2"/><path d="M475 155 l-5 9 h10 z" fill="#1E2125"/>
-    <text x="420" y="308" font-family="IBM Plex Mono" font-size="11" fill="#1E2125">1 m</text>
-    <line x1="410" y1="300" x2="480" y2="300" stroke="#1E2125" stroke-width="1.2"/>
-    <text x="45" y="25" font-family="IBM Plex Sans" font-size="12" fill="#5E6368">Section: ${g.length_m.toFixed(2)} m × ${g.width_m.toFixed(2)} m × ${g.wall_height_m.toFixed(2)} m</text>
-  </svg>`;
+  const solar = result.summary.solar_incident_kwh_m2 || {};
+  const solarRows = Object.entries(solar).map(([key,value]) => `<tr><td>${flowLabel(key)}</td><td class="num">${Number(value).toFixed(1)}</td></tr>`).join("");
+  $("solar-table").innerHTML = `<table class="solar-summary"><thead><tr><th>Solar input</th><th class="num">Value</th></tr></thead><tbody>${solarRows}<tr><td>Transmitted through glazing (kWh)</td><td class="num">${Number(result.summary.solar_transmitted_kwh || 0).toFixed(1)}</td></tr><tr><td>Absorbed by opaque surfaces (kWh)</td><td class="num">${Number(result.summary.solar_absorbed_opaque_kwh || 0).toFixed(1)}</td></tr></tbody></table>`;
 }
-
 function showMetrics(s) {
   $("metrics").innerHTML = [
-    ["Indoor minimum", `${s.t_min_c.toFixed(2)} °C`], ["Indoor maximum", `${s.t_max_c.toFixed(2)} °C`],
-    ["Comfort hours", `${s.comfort_hours.toFixed(1)} h`], ["Below low", `${s.hours_below_low.toFixed(1)} h`], ["Heating energy", `${s.heating_kwh.toFixed(2)} kWh`]
+    ["Minimum indoor", `${s.t_min_c.toFixed(1)} °C`],
+    ["Maximum indoor", `${s.t_max_c.toFixed(1)} °C`],
+    ["Mean indoor − outside", `${s.mean_delta_c.toFixed(1)} K`],
+    ["Hours above 0 °C", `${s.hours_above_zero.toFixed(0)} h`],
+    ["Heating energy", `${s.heating_kwh.toFixed(0)} kWh`]
   ].map(([label,value]) => `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`).join("");
 }
-
-function updateProvenance(meta) {
-  const source = meta.weather_source ?? meta.source ?? "custom";
-  const lat = meta.lat ?? "custom";
-  const lon = meta.lon ?? "custom";
-  $("weather-line").textContent = `Weather: ${source} | ${lat} N ${lon} E | missing hours: ${meta.missing_hours ?? 0}`;
-  $("synthetic-banner").hidden = !meta.synthetic;
-}
-
-function renderCompare(rows) {
-  const keys = ["name","heating_kwh","heating_kwh_per_m2","comfort_hours","overheat_degree_hours","score","orientation_deg","wall_material","insulation_mm","glazing"];
-  $("compare-table").innerHTML = `<thead><tr>${keys.map(k => `<th>${k.replaceAll("_"," ")}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${keys.map(k => `<td class="${typeof r[k]==="number"?"num":""}">${typeof r[k]==="number"?Number(r[k]).toFixed(3):r[k]}</td>`).join("")}</tr>`).join("")}</tbody>`;
-}
-
-function renderMaterialCompare(rows) {
-  const keys = ["wall_material","wall_insulation_mm","heating_kwh","heating_kwh_per_m2","comfort_hours","overheat_degree_hours"];
-  $("material-table").innerHTML = `<thead><tr>${keys.map(k => `<th>${k.replaceAll("_"," ")}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${keys.map(k => `<td class="${typeof r[k]==="number"?"num":""}">${typeof r[k]==="number"?Number(r[k]).toFixed(3):r[k]}</td>`).join("")}</tr>`).join("")}</tbody>`;
-}
-
-function renderAnsysValidation(data) {
-  const badge = $("ansys-badge");
-  badge.textContent = data.status === "completed" ? "VALIDATED" : "UNAVAILABLE";
-  badge.className = data.status === "completed" ? "badge ok" : "badge";
-
-  $("ansys-metrics").innerHTML = [
-    ["Solver", data.solver],
-    ["Scope", data.scope],
-    ["Points compared", Number(data.points_compared).toLocaleString()],
-    ["Max |?T|", `${Number(data.max_abs_difference_c).toFixed(3)} ?C`],
-    ["RMS difference", `${Number(data.rms_difference_c).toFixed(3)} ?C`]
-  ].map(([label, value]) =>
-    `<div class="ansys-metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`
-  ).join("");
-
-  $("ansys-note").textContent = data.note || "";
-}
-
-async function loadAnsysValidation() {
+async function loadSection(design, result) {
   try {
-    const data = await getJSON("/api/ansys-validation");
-    renderAnsysValidation(data);
-  } catch (err) {
-    $("ansys-badge").textContent = "UNAVAILABLE";
-    $("ansys-note").textContent = err.message;
+    const response = await fetch("/api/section", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({design,weather_meta:result.meta,period:result.meta.period})});
+    if (!response.ok) throw new Error(`Section drawing failed (HTTP ${response.status}).`);
+    $("drawing").innerHTML = await response.text();
+  } catch (e) {
+    $("drawing").innerHTML = `<div class="error">${e.message || "Could not load the section drawing."}</div>`;
   }
 }
-
-async function prepareAnsysPackage() {
-  if (!currentResult || !currentDesign) {
-    setStatus("Run a design before preparing the ANSYS package.", true);
-    return;
-  }
-
-  setBusy(true, "ansys");
-  setStatus("Preparing ANSYS Level A package...");
-
-  try {
-    const response = await fetch(`/api/ansys-package?days=${selectedDays()}`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({design: currentDesign})
-    });
-
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({detail: response.statusText}));
-      throw new Error(body.detail || response.statusText);
+async function pollJob(jobId) {
+  activeJobId = jobId;
+  $("cancel-job").hidden = false;
+  while (true) {
+    const job = await getJSON(`/api/jobs/${jobId}`);
+    if (job.kind === "compare" && job.rows) renderCompare(job.rows, job.period);
+    if (job.kind === "materials" && job.rows) renderMaterialCompare(job.rows, job.period);
+    if (job.status === "running") {
+      const seconds = Math.floor((performance.now() - statusStartedAt) / 1000);
+      setStatus(`Running, ${seconds} s so far. ${job.progress} of ${job.total} designs done.`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      continue;
     }
-
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "VAJRA_ANSYS_Level_A.zip";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-
-    setStatus("ANSYS Level A package downloaded.");
-  } catch (err) {
-    setStatus(err.message, true);
+    activeJobId = null;
+    $("cancel-job").hidden = true;
+    stopStatusClock();
+    if (job.status === "failed") throw new Error(job.error || "The server reported a failed computation.");
+    if (job.status === "cancelled") { setStatus("Computation cancelled.", true); return null; }
+    return job;
+  }
+}
+async function runJob(endpoint, options, label, onDone) {
+  startStatusClock(label);
+  setBusy(true);
+  try {
+    const started = await getJSON(endpoint, options);
+    const job = await pollJob(started.job_id);
+    if (job && onDone) await onDone(job, started);
+    if (job) {
+      const elapsed = Number(job.elapsed_wall_s);
+      setStatus(Number.isFinite(elapsed) ? `Done in ${elapsed.toFixed(1)} s, computed on this server.` : "Done. Computed on this server.");
+    }
+    return job;
+  } catch (e) {
+    stopStatusClock();
+    setStatus(e.message, true);
+    throw e;
   } finally {
     setBusy(false);
   }
 }
-
 async function run() {
-  setBusy(true, "run"); setStatus(`Computing ${selectedDays()} day model...`);
-  try {
-    currentDesign = collectDesign();
-    const result = await getJSON(`/api/run?days=${selectedDays()}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(currentDesign)});
-    currentResult = result;
-    updateProvenance(result.meta); plotResult(result); drawSection(currentDesign); showMetrics(result.summary);
-    setStatus(`Run complete. ${result.meta.period[0]} to ${result.meta.period[1]}. Values are model estimates.`);
-  } catch (err) { setStatus(err.message, true); }
-  finally { setBusy(false); }
+  currentDesign = collectDesign();
+  await runJob(`/api/jobs/run?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(currentDesign)}, "Run", async job => {
+    currentResult = job.result?.result || job.result;
+    updateProvenance(currentResult.meta);
+    plotResult(currentResult);
+    showMetrics(currentResult.summary);
+    await loadSection(currentDesign, currentResult);
+  });
 }
-
 async function compare() {
-  setBusy(true, "compare"); setStatus(`Comparing 7 designs on the same ${selectedDays()} day weather window...`);
-  try {
-    const rows = await getJSON(`/api/compare?days=${selectedDays()}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(collectDesign())});
-    renderCompare(rows.rows); setStatus(`Design comparison complete. ${rows.rows.length} rows returned.`);
-  } catch (err) { $("compare-table").innerHTML = `<tbody><tr><td class="error">${err.message}</td></tr></tbody>`; setStatus(err.message, true); }
-  finally { setBusy(false); }
+  const design = collectDesign();
+  await runJob(`/api/jobs/compare?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(design)}, "Compare designs");
 }
-
 async function compareMaterials() {
-  setBusy(true, "compare-materials"); setStatus(`Comparing wall materials on the same ${selectedDays()} day weather window...`);
-  try {
-    const rows = await getJSON(`/api/compare-materials?days=${selectedDays()}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(collectDesign())});
-    renderMaterialCompare(rows.rows); setStatus(`Material comparison complete. ${rows.rows.length} wall materials returned.`);
-  } catch (err) { $("material-table").innerHTML = `<tbody><tr><td class="error">${err.message}</td></tr></tbody>`; setStatus(err.message, true); }
-  finally { setBusy(false); }
+  const design = collectDesign();
+  await runJob(`/api/jobs/materials?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(design)}, "Compare wall materials");
 }
-
 async function loadDefault() {
-  setStatus(`Loading the bundled Leh case for ${selectedDays()} days...`);
-  const data = await getJSON(`/api/default?days=${selectedDays()}`);
-  currentDesign = data.design; currentResult = data.result;
-  updateProvenance(data.result.meta); plotResult(data.result); drawSection(data.design); showMetrics(data.result.summary);
-  setStatus(`Default case loaded. ${data.result.meta.period[0]} to ${data.result.meta.period[1]}. Values are model estimates.`);
+  setStatus(`Loading the ${useColdest() ? "coldest " : ""}${selectedDays()}-day weather window...`);
+  const started = await getJSON(`/api/jobs/default?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`, {method:"POST"});
+  currentDesign = started.design;
+  const job = await pollJob(started.job_id);
+  if (!job) return;
+  currentResult = job.result?.result || job.result;
+  updateProvenance(currentResult.meta);
+  plotResult(currentResult);
+  showMetrics(currentResult.summary);
+  await loadSection(currentDesign, currentResult);
+  setStatus(`Done in ${Number(job.elapsed_wall_s || 0).toFixed(1)} s, computed on this server. ${formatDateRange(currentResult.meta.period)}.`);
 }
-
 async function uploadWeather() {
   const file = $("weather_file").files[0];
   if (!file) { setStatus("Choose a weather CSV first.", true); return; }
-  setBusy(true, "upload-weather"); setStatus(`Reading ${file.name}...`);
+  setBusy(true);
   try {
-    const form = new FormData(); form.append("file", file);
-    const out = await getJSON("/api/upload-weather", {method:"POST", body:form});
+    const form = new FormData();
+    form.append("file", file);
+    const out = await getJSON("/api/upload-weather", {method:"POST",body:form});
     updateProvenance(out.source);
-    setStatus(`Weather file loaded: ${out.rows} hourly rows. Press Run to simulate it.`);
+    $("weather_source").value = "upload";
+    syncSource();
+    setStatus(`Weather file loaded. ${out.rows} hourly rows present. Press Run to simulate it.`);
     $("weather_file").value = "";
-  } catch (err) { setStatus(err.message, true); }
-  finally { setBusy(false); }
+  } catch (e) {
+    setStatus(e.message, true);
+  } finally { setBusy(false); }
 }
-
-$("run").addEventListener("click", run);
-$("compare").addEventListener("click", compare);
-$("compare-materials").addEventListener("click", compareMaterials);
+async function changeWeatherSource() {
+  syncSource();
+  if (weatherSource() === "bundled") {
+    try {
+      const out = await getJSON("/api/use-bundled-weather", {method:"POST"});
+      updateProvenance(out.source);
+      setStatus("Using Leh, 2024 NASA POWER weather. Press Run to simulate it.");
+    } catch (e) { setStatus(e.message, true); }
+  } else {
+    setStatus("Choose a CSV and click Use uploaded weather.");
+  }
+}
+$("run").addEventListener("click", () => run().catch(() => {}));
+$("compare").addEventListener("click", () => compare().catch(() => {}));
+$("compare-materials").addEventListener("click", () => compareMaterials().catch(() => {}));
 $("upload-weather").addEventListener("click", uploadWeather);
-$("period").addEventListener("change", () => setStatus(`Weather period set to ${selectedDays()} days. Press Run to apply it.`));
+$("mass_type").addEventListener("change", setMassVisibility);
+$("weather_source").addEventListener("change", () => changeWeatherSource());
+$("period").addEventListener("change", () => setStatus(`Weather period set to ${$("period").selectedOptions[0].textContent}. Press Run to apply it.`));
+$("cancel-job").addEventListener("click", async () => {
+  if (!activeJobId) return;
+  try {
+    await getJSON(`/api/jobs/${activeJobId}/cancel`, {method:"POST"});
+    setStatus("Computation cancelled.", true);
+    activeJobId = null;
+  } catch (e) { setStatus(e.message, true); }
+});
 $("sheet").addEventListener("click", async () => {
   if (!currentResult || !currentDesign) { setStatus("Run a design before opening the design sheet.", true); return; }
-  setStatus("Opening the design sheet...");
-  const response = await fetch("/api/design-sheet", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({design:currentDesign,result:currentResult})});
-  const html = await response.text(); const w = window.open();
-  if (!w) { setStatus("The browser blocked the new window. Allow pop-ups for VAJRA.", true); return; }
-  w.document.write(html); w.document.close();
+  try {
+    const response = await fetch("/api/design-sheet", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({design:currentDesign,result:currentResult})});
+    if (!response.ok) throw new Error(`Design sheet failed (HTTP ${response.status}).`);
+    const w = window.open();
+    if (!w) { setStatus("The browser blocked the design sheet window. Allow pop-ups for VAJRA.", true); return; }
+    w.document.write(await response.text()); w.document.close();
+  } catch (e) { setStatus(e.message || "Could not open the design sheet.", true); }
 });
-$("ansys").addEventListener("click", prepareAnsysPackage);
-
+$("ansys").addEventListener("click", async () => {
+  if (!currentResult || !currentDesign) { setStatus("Run a design before preparing the ANSYS package.", true); return; }
+  setBusy(true);
+  try {
+    const response = await fetch(`/api/ansys-package?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({design:currentDesign})});
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || `ANSYS package failed (HTTP ${response.status}).`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "VAJRA_ANSYS_Level_A.zip"; a.click();
+    URL.revokeObjectURL(url);
+    setStatus("ANSYS Level A package downloaded.");
+  } catch (e) { setStatus(e.message || "Could not prepare the ANSYS package.", true); }
+  finally { setBusy(false); }
+});
 (async () => {
   setBusy(true);
   try {
+    await waitForHealth();
     materials = await getJSON("/api/materials");
-    populateSelect("wall_material", materials.materials); populateSelect("roof_material", materials.materials); populateSelect("floor_material", materials.materials); populateSelect("glazing", materials.glazing);
-    $("wall_material").value = "stone_masonry"; $("roof_material").value = "mineral_wool"; $("floor_material").value = "concrete_dense"; $("glazing").value = "double_clear";
-    const info = await getJSON("/api/weather-info"); updateProvenance(info.meta);
-    await loadAnsysValidation();
+    populateSelect("wall_material", materials.materials);
+    populateSelect("roof_material", materials.materials);
+    populateSelect("floor_material", materials.materials);
+    populateSelect("glazing", materials.glazing);
+    $("wall_material").value = "stone_masonry";
+    $("roof_material").value = "mineral_wool";
+    $("floor_material").value = "concrete_dense";
+    $("glazing").value = "double_clear";
+    setMassVisibility();
+    syncSource();
+    const info = await getJSON("/api/weather-info?source=bundled");
+    updateProvenance(info.meta);
+    try {
+      const a = await getJSON("/api/ansys-validation");
+      $("ansys-badge").textContent = a.status === "completed" ? "VALIDATED" : "UNAVAILABLE";
+      $("ansys-badge").className = a.status === "completed" ? "badge ok" : "badge";
+      $("ansys-metrics").innerHTML = [
+        ["Solver", a.solver], ["Scope", a.scope], ["Points compared", Number(a.points_compared).toLocaleString()],
+        ["Max |ΔT|", `${Number(a.max_abs_difference_c).toFixed(2)} °C`], ["RMS difference", `${Number(a.rms_difference_c).toFixed(2)} °C`]
+      ].map(([x,y]) => `<div class="ansys-metric"><div class="metric-label">${x}</div><div class="metric-value">${y}</div></div>`).join("");
+      $("ansys-note").textContent = a.note || "";
+    } catch (e) {
+      $("ansys-badge").textContent = "UNAVAILABLE";
+      $("ansys-note").textContent = e.message || "ANSYS validation record unavailable.";
+    }
     await loadDefault();
-  } catch (err) { setStatus(err.message, true); }
-  finally { setBusy(false); }
+  } catch (e) {
+    setStatus(e.message || "The server could not start the page.", true);
+  } finally { setBusy(false); }
 })();

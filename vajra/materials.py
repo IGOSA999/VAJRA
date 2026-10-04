@@ -8,6 +8,7 @@ import csv
 @dataclass(frozen=True)
 class Material:
     name: str
+    label: str
     lambda_w_mk: float
     rho_kg_m3: float
     c_j_kgk: float
@@ -21,6 +22,7 @@ class Material:
 @dataclass(frozen=True)
 class Glazing:
     name: str
+    label: str
     u_w_m2k: float
     shgc: float
     source: str
@@ -43,6 +45,7 @@ def load_materials(path: Path) -> dict[str, Material]:
             name = row["name"].strip()
             materials[name] = Material(
                 name=name,
+                label=(row.get("label") or name.replace("_", " ").title()).strip(),
                 lambda_w_mk=_as_float(row, "lambda_w_mk"),
                 rho_kg_m3=_as_float(row, "rho_kg_m3"),
                 c_j_kgk=_as_float(row, "c_j_kgk"),
@@ -62,6 +65,7 @@ def load_glazing(path: Path) -> dict[str, Glazing]:
             name = row["name"].strip()
             glazing[name] = Glazing(
                 name=name,
+                label=(row.get("label") or name.replace("_", " ").title()).strip(),
                 u_w_m2k=_as_float(row, "u_w_m2k"),
                 shgc=_as_float(row, "shgc"),
                 source=row["source"].strip(),
