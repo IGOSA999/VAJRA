@@ -418,7 +418,7 @@ $("ansys").addEventListener("click", async () => {
   finally { setBusy(false); }
 });
 (async () => {
-  setBusy(true);
+
   try {
     await waitForHealth();
     materials = await getJSON("/api/materials");
@@ -447,7 +447,7 @@ $("ansys").addEventListener("click", async () => {
       $("ansys-badge").textContent = "UNAVAILABLE";
       $("ansys-note").textContent = e.message || "ANSYS validation record unavailable.";
     }
-    await loadDefault();
+    setStatus("Ready. Press Run to simulate the selected design.");
   } catch (e) {
     setStatus(e.message || "The server could not start the page.", true);
   } finally { setBusy(false); }
