@@ -42,7 +42,7 @@ function setBusy(busy, activeId=null) {
     $("compare").textContent = "Compare designs";
     $("compare-materials").textContent = "Compare wall materials";
     $("sheet").textContent = "Open design sheet";
-    $("ansys").textContent = "Prepare ANSYS files";
+    $("ansys").textContent = "Prepare & download ANSYS package";
     $("upload-weather").textContent = "Use uploaded weather";
   }
 }
@@ -161,6 +161,73 @@ function renderMaterialCompare(rows) {
   $("material-table").innerHTML = `<thead><tr>${keys.map(k => `<th>${k.replaceAll("_"," ")}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${keys.map(k => `<td class="${typeof r[k]==="number"?"num":""}">${typeof r[k]==="number"?Number(r[k]).toFixed(3):r[k]}</td>`).join("")}</tr>`).join("")}</tbody>`;
 }
 
+function renderAnsysValidation(data) {
+  const badge = $("ansys-badge");
+  badge.textContent = data.status === "completed" ? "VALIDATED" : "UNAVAILABLE";
+  badge.className = data.status === "completed" ? "badge ok" : "badge";
+
+  $("ansys-metrics").innerHTML = [
+    ["Solver", data.solver],
+    ["Scope", data.scope],
+    ["Points compared", Number(data.points_compared).toLocaleString()],
+    ["Max |?T|", `${Number(data.max_abs_difference_c).toFixed(3)} ?C`],
+    ["RMS difference", `${Number(data.rms_difference_c).toFixed(3)} ?C`]
+  ].map(([label, value]) =>
+    `<div class="ansys-metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`
+  ).join("");
+
+  $("ansys-note").textContent = data.note || "";
+}
+
+async function loadAnsysValidation() {
+  try {
+    const data = await getJSON("/api/ansys-validation");
+    renderAnsysValidation(data);
+  } catch (err) {
+    $("ansys-badge").textContent = "UNAVAILABLE";
+    $("ansys-note").textContent = err.message;
+  }
+}
+
+async function prepareAnsysPackage() {
+  if (!currentResult || !currentDesign) {
+    setStatus("Run a design before preparing the ANSYS package.", true);
+    return;
+  }
+
+  setBusy(true, "ansys");
+  setStatus("Preparing ANSYS Level A package...");
+
+  try {
+    const response = await fetch(`/api/ansys-package?days=${selectedDays()}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({design: currentDesign})
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({detail: response.statusText}));
+      throw new Error(body.detail || response.statusText);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "VAJRA_ANSYS_Level_A.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    setStatus("ANSYS Level A package downloaded.");
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function run() {
   setBusy(true, "run"); setStatus(`Computing ${selectedDays()} day model...`);
   try {
@@ -226,15 +293,7 @@ $("sheet").addEventListener("click", async () => {
   if (!w) { setStatus("The browser blocked the new window. Allow pop-ups for VAJRA.", true); return; }
   w.document.write(html); w.document.close();
 });
-$("ansys").addEventListener("click", async () => {
-  if (!currentResult || !currentDesign) { setStatus("Run a design before preparing ANSYS files.", true); return; }
-  setBusy(true, "ansys"); setStatus("Preparing ANSYS Level A files...");
-  try {
-    const out = await getJSON(`/api/ansys?days=${selectedDays()}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({design:currentDesign})});
-    setStatus(`Prepared ${out.files.length} ANSYS files. Check exports/ansys.`);
-  } catch (err) { setStatus(err.message, true); }
-  finally { setBusy(false); }
-});
+$("ansys").addEventListener("click", prepareAnsysPackage);
 
 (async () => {
   setBusy(true);
@@ -243,6 +302,7 @@ $("ansys").addEventListener("click", async () => {
     populateSelect("wall_material", materials.materials); populateSelect("roof_material", materials.materials); populateSelect("floor_material", materials.materials); populateSelect("glazing", materials.glazing);
     $("wall_material").value = "stone_masonry"; $("roof_material").value = "mineral_wool"; $("floor_material").value = "concrete_dense"; $("glazing").value = "double_clear";
     const info = await getJSON("/api/weather-info"); updateProvenance(info.meta);
+    await loadAnsysValidation();
     await loadDefault();
   } catch (err) { setStatus(err.message, true); }
   finally { setBusy(false); }

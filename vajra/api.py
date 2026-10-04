@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+from io import BytesIO
+import zipfile
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .materials import load_glazing, load_materials
@@ -180,6 +183,39 @@ async def upload_weather(file: UploadFile = File(...)):
 @app.post("/api/design-sheet", response_class=HTMLResponse)
 def make_design_sheet(payload: dict):
     return HTMLResponse(design_sheet_html(payload["design"], payload["result"]))
+
+
+@app.get("/api/ansys-validation")
+def ansys_validation():
+    path = ROOT / "data" / "ansys_validation.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="ANSYS validation record is not available")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@app.post("/api/ansys-package")
+def ansys_package(payload: dict, days: int = 14):
+    try:
+        days = requested_days(days)
+        design = payload.get("design")
+        if not isinstance(design, dict):
+            raise ValueError("ANSYS export needs a design object")
+        validate_design(design)
+        files = export_ansys_case(design, current_weather(days), MATERIALS, GLAZING)
+
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in files:
+                archive.write(path, arcname=path.name)
+        buffer.seek(0)
+
+        return StreamingResponse(
+            buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="VAJRA_ANSYS_Level_A.zip"'},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/ansys")

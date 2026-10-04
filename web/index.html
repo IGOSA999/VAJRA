@@ -71,7 +71,7 @@
         <button id="compare" class="secondary">Compare designs</button>
         <button id="compare-materials" class="secondary">Compare wall materials</button>
         <button id="sheet" class="secondary">Open design sheet</button>
-        <button id="ansys" class="secondary">Prepare ANSYS files</button>
+        <button id="ansys" class="secondary">Prepare &amp; download ANSYS package</button>
       </aside>
 
       <section class="results">
@@ -91,6 +91,18 @@
           </section>
         </div>
         <section class="panel metrics" id="metrics"></section>
+        <section class="panel ansys-panel">
+          <div class="ansys-heading">
+            <div>
+              <h2>ANSYS Level A cross-check</h2>
+              <div class="help">Recorded validation of the exported transient wall panel.</div>
+            </div>
+            <span id="ansys-badge" class="badge">Loading</span>
+          </div>
+          <div id="ansys-metrics" class="ansys-metrics"></div>
+          <div id="ansys-note" class="help"></div>
+        </section>
+
         <section class="panel">
           <h2>Design comparison</h2>
           <div class="table-wrap"><table id="compare-table"><thead></thead><tbody><tr><td>No run yet. Choose a design and press Run.</td></tr></tbody></table></div>
