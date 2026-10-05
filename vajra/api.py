@@ -43,11 +43,31 @@ JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 
 
+def _enrich_result_meta(result: dict, weather: WeatherFrame, design: dict) -> dict:
+    meta = result.setdefault("meta", {})
+    meta.update({
+        "elevation_m": weather.meta.get("elevation_m", design["site"].get("elevation_m")),
+        "provider": weather.meta.get("provider", "Weather input"),
+        "year": weather.meta.get("year"),
+        "expected_hours": weather.meta.get(
+            "expected_hours",
+            weather.meta.get("present_hours", len(weather.frame))
+        ),
+        "present_hours": weather.meta.get("present_hours", len(weather.frame)),
+        "lat": weather.meta.get("lat", design["site"].get("lat")),
+        "lon": weather.meta.get("lon", design["site"].get("lon")),
+        "site_elevation_m": float(design["site"]["elevation_m"]),
+        "design_name": design["name"],
+    })
+    return result
+
+
 def _worker_pair(design, weather, materials_path, glazing_path):
     started_wall = time.perf_counter()
     started_cpu = time.process_time()
     free = simulate(design, weather, materials_path, glazing_path, dt_minutes=60, run="free")
     heater = simulate(design, weather, materials_path, glazing_path, dt_minutes=60, run="heater")
+    free = _enrich_result_meta(free, weather, design)
     free["summary"]["heating_kwh"] = heater["summary"]["heating_kwh"]
     free["summary"]["heating_kwh_per_m2"] = heater["summary"]["heating_kwh_per_m2"]
     free["series"]["heater_w"] = heater["series"]["heater_w"]
@@ -59,6 +79,7 @@ def _worker_design_row(design, weather, materials_path, glazing_path):
     started_cpu = time.process_time()
     free = simulate(design, weather, materials_path, glazing_path, dt_minutes=60, run="free")
     heater = simulate(design, weather, materials_path, glazing_path, dt_minutes=60, run="heater")
+    free = _enrich_result_meta(free, weather, design)
     return {"row": _row_from_runs(design, free, heater), "server_elapsed_wall_s": time.perf_counter()-started_wall, "server_cpu_s": time.process_time()-started_cpu}
 
 

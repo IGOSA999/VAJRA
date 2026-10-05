@@ -1,7 +1,7 @@
 let materials = null;
 let currentResult = null;
 let currentDesign = null;
-let currentWeatherMeta = null;
+let siteMeta = null;
 let activeJobId = null;
 let statusTimer = null;
 let statusStartedAt = 0;
@@ -94,7 +94,7 @@ function formatDateRange(period) {
   return `${a.getDate()} ${months[a.getMonth()]} ${a.getFullYear()} to ${b.getDate()} ${months[b.getMonth()]} ${b.getFullYear()}`;
 }
 function updateProvenance(meta) {
-  currentWeatherMeta = meta || {};
+  meta = meta || {};
   const provider = meta.provider || meta.weather_source || "Weather input";
   const name = provider === "NASA POWER" ? "Leh, Ladakh" : provider === "Uploaded weather file" ? `Your file: ${meta.source}` : "Weather input";
   const lat = Number.isFinite(Number(meta.lat)) ? `${Number(meta.lat).toFixed(2)}° N` : "site coordinates not supplied";
@@ -112,10 +112,22 @@ function setMassVisibility() {
 function syncSource() {
   $("upload-block").hidden = $("weather_source").value !== "upload";
 }
-function collectDesign() {
-  const lat = Number(currentWeatherMeta?.lat);
-  const lon = Number(currentWeatherMeta?.lon);
-  const elevation = Number(currentWeatherMeta?.elevation_m);
+async function collectDesign() {
+  let meta = siteMeta || {};
+  let lat = Number(meta.lat);
+  let lon = Number(meta.lon);
+  let elevation = Number(meta.elevation_m);
+
+  if (![lat, lon, elevation].every(Number.isFinite)) {
+    const info = await getJSON(`/api/weather-info?source=${weatherSource()}`);
+    siteMeta = info.meta || {};
+    updateProvenance(siteMeta);
+    meta = siteMeta;
+    lat = Number(meta.lat);
+    lon = Number(meta.lon);
+    elevation = Number(meta.elevation_m);
+  }
+
   if (![lat, lon, elevation].every(Number.isFinite)) {
     throw new Error("The active weather source does not provide site coordinates and elevation for the solar calculation.");
   }
@@ -294,11 +306,12 @@ async function pollJob(jobId) {
     return job;
   }
 }
-async function runJob(endpoint, options, label, onDone) {
+async function runJob(requestFactory, label, onDone) {
   startStatusClock(label);
   setBusy(true);
   try {
-    const started = await getJSON(endpoint, options);
+    const request = await requestFactory();
+    const started = await getJSON(request.endpoint, request.options);
     const job = await pollJob(started.job_id);
     if (job && onDone) await onDone(job, started);
     if (job) {
@@ -308,15 +321,25 @@ async function runJob(endpoint, options, label, onDone) {
     return job;
   } catch (e) {
     stopStatusClock();
-    setStatus(e.message, true);
-    throw e;
+    setStatus(e.message || "The computation failed.", true);
+    return null;
   } finally {
     setBusy(false);
   }
 }
+
 async function run() {
-  currentDesign = collectDesign();
-  await runJob(`/api/jobs/run?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(currentDesign)}, "Run", async job => {
+  await runJob(async () => {
+    currentDesign = await collectDesign();
+    return {
+      endpoint: `/api/jobs/run?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`,
+      options: {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(currentDesign)
+      }
+    };
+  }, "Run", async job => {
     currentResult = job.result?.result || job.result;
     updateProvenance(currentResult.meta);
     plotResult(currentResult);
@@ -324,13 +347,33 @@ async function run() {
     await loadSection(currentDesign, currentResult);
   });
 }
+
 async function compare() {
-  const design = collectDesign();
-  await runJob(`/api/jobs/compare?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(design)}, "Compare designs");
+  await runJob(async () => {
+    const design = await collectDesign();
+    return {
+      endpoint: `/api/jobs/compare?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`,
+      options: {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(design)
+      }
+    };
+  }, "Compare designs");
 }
+
 async function compareMaterials() {
-  const design = collectDesign();
-  await runJob(`/api/jobs/materials?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(design)}, "Compare wall materials");
+  await runJob(async () => {
+    const design = await collectDesign();
+    return {
+      endpoint: `/api/jobs/materials?days=${selectedDays()}&coldest=${useColdest()}&source=${weatherSource()}`,
+      options: {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(design)
+      }
+    };
+  }, "Compare wall materials");
 }
 async function loadDefault() {
   setStatus(`Loading the ${useColdest() ? "coldest " : ""}${selectedDays()}-day weather window...`);
@@ -353,7 +396,8 @@ async function uploadWeather() {
     const form = new FormData();
     form.append("file", file);
     const out = await getJSON("/api/upload-weather", {method:"POST",body:form});
-    updateProvenance(out.source);
+    siteMeta = out.source || {};
+    updateProvenance(siteMeta);
     $("weather_source").value = "upload";
     syncSource();
     setStatus(`Weather file loaded. ${out.rows} hourly rows present. Press Run to simulate it.`);
@@ -367,16 +411,17 @@ async function changeWeatherSource() {
   if (weatherSource() === "bundled") {
     try {
       const out = await getJSON("/api/use-bundled-weather", {method:"POST"});
-      updateProvenance(out.source);
+      siteMeta = out.source || {};
+      updateProvenance(siteMeta);
       setStatus("Using Leh, 2024 NASA POWER weather. Press Run to simulate it.");
     } catch (e) { setStatus(e.message, true); }
   } else {
     setStatus("Choose a CSV and click Use uploaded weather.");
   }
 }
-$("run").addEventListener("click", () => run().catch(() => {}));
-$("compare").addEventListener("click", () => compare().catch(() => {}));
-$("compare-materials").addEventListener("click", () => compareMaterials().catch(() => {}));
+$("run").addEventListener("click", run);
+$("compare").addEventListener("click", compare);
+$("compare-materials").addEventListener("click", compareMaterials);
 $("upload-weather").addEventListener("click", uploadWeather);
 $("mass_type").addEventListener("change", setMassVisibility);
 $("weather_source").addEventListener("change", () => changeWeatherSource());
@@ -433,7 +478,8 @@ $("ansys").addEventListener("click", async () => {
     setMassVisibility();
     syncSource();
     const info = await getJSON("/api/weather-info?source=bundled");
-    updateProvenance(info.meta);
+    siteMeta = info.meta || {};
+    updateProvenance(siteMeta);
     try {
       const a = await getJSON("/api/ansys-validation");
       $("ansys-badge").textContent = a.status === "completed" ? "VALIDATED" : "UNAVAILABLE";
